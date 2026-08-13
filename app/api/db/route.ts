@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 
+const DEFAULT_DATABASE_URL =
+  "postgresql://neondb_owner:npg_2mJfV9PEOyqk@ep-steep-shadow-az4e9nu5-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require";
+
+const getDbUrl = () => process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
+
 async function queryNeon(connectionString: string, sqlQuery: string, params: unknown[] = []) {
   const directUrl = connectionString.replace("-pooler", "");
   const parsed = new URL(directUrl.split("?")[0]);
@@ -25,14 +30,7 @@ async function queryNeon(connectionString: string, sqlQuery: string, params: unk
 }
 
 export async function GET() {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    return NextResponse.json({
-      connected: false,
-      mode: "local",
-      message: "DATABASE_URL is not set. Running in browser LocalStorage mode."
-    });
-  }
+  const dbUrl = getDbUrl();
 
   try {
     await queryNeon(
@@ -77,14 +75,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    return NextResponse.json({
-      success: false,
-      mode: "local",
-      message: "DATABASE_URL is not configured on Vercel/env. Operating in LocalStorage mode."
-    });
-  }
+  const dbUrl = getDbUrl();
 
   try {
     const body = await request.json();
