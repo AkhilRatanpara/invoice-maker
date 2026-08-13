@@ -222,6 +222,22 @@ function formattedDateForFile(date: string) {
   return `${day}-${month}-${year}`;
 }
 
+function formatLastEdited(isoString?: string) {
+  if (!isoString) return "Just now";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    return (
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) +
+      " (" +
+      d.toLocaleDateString([], { day: "2-digit", month: "2-digit" }) +
+      ")"
+    );
+  } catch {
+    return isoString;
+  }
+}
+
 function invoiceFilename(invoice: Invoice, extension: "pdf" | "xlsx" | "docx") {
   return `${customerFirstName(invoice)}_Invoice_${formattedDateForFile(invoice.date)}.${extension}`;
 }
@@ -865,7 +881,12 @@ export default function Home() {
                           <span className="card-sub">{invoice.customerDescription}</span>
                         )}
                       </div>
-                      <span className="card-date">{invoice.date}</span>
+                      <div className="card-date-col">
+                        <span className="card-date">Date: {invoice.date}</span>
+                        <span className="card-last-edited">
+                          Last edited: {formatLastEdited(invoice.lastEdited)}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="card-total-row">
@@ -909,13 +930,20 @@ export default function Home() {
         /* --- EDITOR VIEW --- */
         <section className="editor-container">
           <div className="editor-top-nav">
-            <button className="secondary flex-btn" onClick={() => {
-              setViewMode("dashboard");
-              pushState("dashboard");
-            }}>
+            <button
+              className="secondary flex-btn"
+              onClick={() => {
+                setViewMode("dashboard");
+                pushState("dashboard");
+              }}
+            >
               <ArrowLeft size={18} />
               <span>Back to Dashboard</span>
             </button>
+
+            <div className="editor-saved-tag">
+              <span>Last edited: {formatLastEdited(activeInvoice?.lastEdited)}</span>
+            </div>
 
             <div className="editor-step-tabs">
               {[
