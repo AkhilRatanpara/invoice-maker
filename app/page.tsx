@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Building2,
@@ -365,16 +365,22 @@ export default function Home() {
   );
   const favoritePresets = visiblePresets.filter((item) => item.favorite).slice(0, 8);
 
+  const invoicesByCustomer = useMemo(() => {
+    const map = new Map<string, Invoice[]>();
+    invoicesForBusiness.forEach((inv) => {
+      const name = inv.customerName.trim() || "Unassigned / Drafts";
+      const existing = map.get(name) || [];
+      map.set(name, [...existing, inv]);
+    });
+    return Array.from(map.entries());
+  }, [invoicesForBusiness]);
+
   useEffect(() => {
     if (!ready || mode !== "app") return;
-    if (!activeInvoice && invoicesForBusiness.length === 0) {
-      const invoice = newInvoice(business.id);
-      setData((current) => ({ ...current, invoices: [invoice, ...current.invoices] }));
-      setActiveInvoiceId(invoice.id);
-    } else if (!activeInvoiceId && invoicesForBusiness[0]) {
+    if (!activeInvoiceId && invoicesForBusiness[0]) {
       setActiveInvoiceId(invoicesForBusiness[0].id);
     }
-  }, [activeInvoice, activeInvoiceId, business.id, invoicesForBusiness, mode, ready]);
+  }, [activeInvoiceId, invoicesForBusiness, mode, ready]);
 
   // Handle phone & browser back button
   useEffect(() => {
@@ -519,15 +525,35 @@ export default function Home() {
   };
 
   const saveCustomerFromInvoice = () => {
-    if (!activeInvoice?.customerName.trim()) return;
-    const customer: Customer = {
-      id: uid(),
-      businessId: business.id,
-      name: activeInvoice.customerName.trim(),
-      description: activeInvoice.customerDescription.trim()
-    };
-    setData((current) => ({ ...current, customers: [customer, ...current.customers] }));
-    updateInvoice((invoice) => ({ ...invoice, customerId: customer.id }));
+    const name = activeInvoice?.customerName.trim();
+    if (!name) {
+      alert("Please enter Customer Name first.");
+      return;
+    }
+    const existing = data.customers.find(
+      (c) => c.businessId === business.id && c.name.toLowerCase() === name.toLowerCase()
+    );
+    if (existing) {
+      const updatedCustomers = data.customers.map((c) =>
+        c.id === existing.id
+          ? { ...c, description: activeInvoice.customerDescription.trim() }
+          : c
+      );
+      saveDataAndSync({ ...data, customers: updatedCustomers });
+      updateInvoice((inv) => ({ ...inv, customerId: existing.id }));
+      alert(`Updated "${name}" in Customer Database!`);
+    } else {
+      const customer: Customer = {
+        id: uid(),
+        businessId: business.id,
+        name,
+        description: activeInvoice.customerDescription.trim()
+      };
+      const updatedCustomers = [customer, ...data.customers];
+      saveDataAndSync({ ...data, customers: updatedCustomers });
+      updateInvoice((inv) => ({ ...inv, customerId: customer.id }));
+      alert(`Saved "${name}" to Customer Database!`);
+    }
   };
 
   const addGroup = () => {
@@ -881,61 +907,74 @@ export default function Home() {
                 </button>
               </div>
             ) : (
-              <div className="drafts-grid">
-                {invoicesForBusiness.map((invoice) => (
-                  <div
-                    key={invoice.id}
-                    className={
-                      activeInvoice && invoice.id === activeInvoice.id
-                        ? "draft-card active"
-                        : "draft-card"
-                    }
-                  >
-                    <div className="card-top">
-                      <div>
-                        <h4>{invoice.customerName || "New Customer"}</h4>
-                        {invoice.customerDescription && (
-                          <span className="card-sub">{invoice.customerDescription}</span>
-                        )}
-                      </div>
-                      <div className="card-date-col">
-                        <span className="card-date">Date: {invoice.date}</span>
-                        <span className="card-last-edited">
-                          Last edited: {formatLastEdited(invoice.lastEdited)}
-                        </span>
-                      </div>
+              <div className="customer-grouped-list">
+                {invoicesByCustomer.map(([customerName, invoices]) => (
+                  <div key={customerName} className="customer-group-section">
+                    <div className="customer-group-header">
+                      <span className="customer-group-title">👤 {customerName}</span>
+                      <span className="customer-bill-count">
+                        {invoices.length} {invoices.length === 1 ? "Bill" : "Bills"}
+                      </span>
                     </div>
 
-                    <div className="card-total-row">
-                      <span>Total Amount</span>
-                      <strong>Rs. {money(invoiceTotal(invoice))}</strong>
-                    </div>
+                    <div className="drafts-grid">
+                      {invoices.map((invoice) => (
+                        <div
+                          key={invoice.id}
+                          className={
+                            activeInvoice && invoice.id === activeInvoice.id
+                              ? "draft-card active"
+                              : "draft-card"
+                          }
+                        >
+                          <div className="card-top">
+                            <div>
+                              <h4>{invoice.customerName || "New Customer"}</h4>
+                              {invoice.customerDescription && (
+                                <span className="card-sub">{invoice.customerDescription}</span>
+                              )}
+                            </div>
+                            <div className="card-date-col">
+                              <span className="card-date">Date: {invoice.date}</span>
+                              <span className="card-last-edited">
+                                Last edited: {formatLastEdited(invoice.lastEdited)}
+                              </span>
+                            </div>
+                          </div>
 
-                    <div className="card-actions">
-                      <button
-                        className="primary flex-1"
-                        onClick={() => openInvoiceForEdit(invoice.id)}
-                      >
-                        <Pencil size={16} />
-                        Edit Invoice
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() => {
-                          setActiveInvoiceId(invoice.id);
-                          exportPdf();
-                        }}
-                        title="Download PDF"
-                      >
-                        <Printer size={16} />
-                      </button>
-                      <button
-                        className="secondary danger-text"
-                        onClick={() => deleteInvoice(invoice.id)}
-                        title="Delete Invoice"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                          <div className="card-total-row">
+                            <span>Total Amount</span>
+                            <strong>Rs. {money(invoiceTotal(invoice))}</strong>
+                          </div>
+
+                          <div className="card-actions">
+                            <button
+                              className="primary flex-1"
+                              onClick={() => openInvoiceForEdit(invoice.id)}
+                            >
+                              <Pencil size={16} />
+                              Edit Invoice
+                            </button>
+                            <button
+                              className="secondary"
+                              onClick={() => {
+                                setActiveInvoiceId(invoice.id);
+                                exportPdf();
+                              }}
+                              title="Download PDF"
+                            >
+                              <Printer size={16} />
+                            </button>
+                            <button
+                              className="secondary danger-text"
+                              onClick={() => deleteInvoice(invoice.id)}
+                              title="Delete Invoice"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
@@ -1173,24 +1212,11 @@ export default function Home() {
                     ))}
                   </datalist>
 
-                  <datalist id="unit-presets">
-                    <option value="No" />
-                    <option value="Pcs" />
-                    <option value="Kg" />
-                    <option value="Mtr" />
-                    <option value="Set" />
-                    <option value="Hrs" />
-                    <option value="Bags" />
-                    <option value="Box" />
-                    <option value="Ltr" />
-                  </datalist>
-
                   <div className="items-table">
                     <div className="table-head">
                       <span>Sr.</span>
                       <span>Particulars / Description</span>
                       <span>Qty</span>
-                      <span>Unit</span>
                       <span>Rate (Rs.)</span>
                       <span>Total Amount (Rs.)</span>
                       <span />
@@ -1238,68 +1264,43 @@ export default function Home() {
                               </div>
                             </div>
 
-                            <div className="qty-cell">
-                              <span className="mobile-label">Qty</span>
-                              <input
-                                type="number"
-                                min="0"
-                                value={row.qty === 0 ? "" : row.qty}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(event) =>
-                                  updateInvoice((invoice) => ({
-                                    ...invoice,
-                                    groups: invoice.groups.map((invoiceGroup) =>
-                                      invoiceGroup.id === group.id
-                                        ? {
-                                            ...invoiceGroup,
-                                            rows: invoiceGroup.rows.map((itemRow) =>
-                                              itemRow.id === row.id
-                                                ? {
-                                                    ...itemRow,
-                                                    qty:
-                                                      event.target.value === ""
-                                                        ? 0
-                                                        : Number(event.target.value)
-                                                  }
-                                                : itemRow
-                                            )
-                                          }
-                                        : invoiceGroup
-                                    )
-                                  }))
-                                }
-                                placeholder="1"
-                              />
-                            </div>
+                            <div className="item-num-grid">
+                              <div className="qty-cell">
+                                <span className="mobile-label">Qty</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={row.qty === 0 ? "" : row.qty}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(event) =>
+                                    updateInvoice((invoice) => ({
+                                      ...invoice,
+                                      groups: invoice.groups.map((invoiceGroup) =>
+                                        invoiceGroup.id === group.id
+                                          ? {
+                                              ...invoiceGroup,
+                                              rows: invoiceGroup.rows.map((itemRow) =>
+                                                itemRow.id === row.id
+                                                  ? {
+                                                      ...itemRow,
+                                                      qty:
+                                                        event.target.value === ""
+                                                          ? 0
+                                                          : Number(event.target.value)
+                                                    }
+                                                  : itemRow
+                                              )
+                                            }
+                                          : invoiceGroup
+                                      )
+                                    }))
+                                  }
+                                  placeholder="1"
+                                />
+                              </div>
 
-                            <div className="unit-cell">
-                              <span className="mobile-label">Unit</span>
-                              <input
-                                list="unit-presets"
-                                value={row.unit}
-                                onChange={(event) =>
-                                  updateInvoice((invoice) => ({
-                                    ...invoice,
-                                    groups: invoice.groups.map((invoiceGroup) =>
-                                      invoiceGroup.id === group.id
-                                        ? {
-                                            ...invoiceGroup,
-                                            rows: invoiceGroup.rows.map((itemRow) =>
-                                              itemRow.id === row.id
-                                                ? { ...itemRow, unit: event.target.value }
-                                                : itemRow
-                                            )
-                                          }
-                                        : invoiceGroup
-                                    )
-                                  }))
-                                }
-                                placeholder="No"
-                              />
-                            </div>
-
-                            <div className="rate-cell">
-                              <span className="mobile-label">Rate (Rs.)</span>
+                              <div className="rate-cell">
+                                <span className="mobile-label">Rate (Rs.)</span>
                               <input
                                 className="money-input"
                                 type="number"
@@ -1332,6 +1333,7 @@ export default function Home() {
                                 }
                                 placeholder="0.00"
                               />
+                              </div>
                             </div>
 
                             <div className="amount-cell">

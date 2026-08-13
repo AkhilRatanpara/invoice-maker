@@ -1216,9 +1216,43 @@ button {
 .table-head,
 .item-row {
   display: grid;
-  grid-template-columns: 54px minmax(220px, 2fr) 76px 86px 110px 125px 44px;
+  grid-template-columns: 54px minmax(260px, 3fr) 84px 115px 135px 44px;
   align-items: center;
   gap: 8px;
+}
+
+.item-num-grid {
+  display: contents;
+}
+
+.customer-group-section {
+  margin-bottom: 28px;
+}
+
+.customer-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #f4f1ea;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+.customer-group-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--heading);
+}
+
+.customer-bill-count {
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--accent-dark);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 12px;
 }
 
 .card-date-col {
@@ -1245,6 +1279,72 @@ button {
 }
 
 @media (max-width: 760px) {
+  .table-head {
+    display: none;
+  }
+
+  .item-row {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: #ffffff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+
+  .sr-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 900;
+    border: 1px solid #bfe2dc;
+    width: max-content;
+  }
+
+  .item-row .icon-button.danger {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    min-height: 38px;
+    min-width: 38px;
+    padding: 6px;
+    background: #fff1f0;
+    border: 1px solid #fda29b;
+    border-radius: 6px;
+  }
+
+  .item-num-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .description-cell input,
+  .qty-cell input,
+  .rate-cell input,
+  .amount-cell input {
+    font-size: 16px !important;
+  }
+
+  .mobile-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
   .dashboard-hero {
     flex-direction: column;
     align-items: stretch;
