@@ -9,14 +9,12 @@ async function queryNeon(connectionString: string, sqlQuery: string, params: unk
   const directUrl = connectionString.replace("-pooler", "");
   const parsed = new URL(directUrl.split("?")[0]);
   const host = parsed.hostname;
-  const password = parsed.password;
 
   const response = await fetch(`https://${host}/sql`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Neon-Connection-String": directUrl,
-      Authorization: `Bearer ${password}`
+      "Neon-Connection-String": connectionString
     },
     body: JSON.stringify({ query: sqlQuery, params })
   });
