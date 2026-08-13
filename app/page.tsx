@@ -133,25 +133,25 @@ const seedData: AppData = {
     }
   ],
   presets: [
-    preset("Rewinding CEILING FAN", 450, true),
-    preset("2.5 MFD CAPACITOR", 50, true),
-    preset("CAPACITOR CAMP", 10, true),
-    preset("Rewinding 1-HP - 700 RPM TORQUE MOTOR", 1500, true),
-    preset("Rewinding ALMONARD FAN", 1500, true),
-    preset("4 MFD CAPACITOR", 70, false),
-    preset("Rewinding 1-HP - 1440 RPM MOTOR", 1500, false),
-    preset("Rewinding 2-HP - 1440 RPM MOTOR", 1920, false),
-    preset("Bearing 6203", 163, false),
-    preset("PVC Fan", 80, false),
-    preset("Waterseal", 160, false),
-    preset("Terminal Plate", 70, false)
+    preset("preset-ceiling-fan", "Rewinding CEILING FAN", 450, true),
+    preset("preset-capacitor-25", "2.5 MFD CAPACITOR", 50, true),
+    preset("preset-capacitor-camp", "CAPACITOR CAMP", 10, true),
+    preset("preset-torque-motor", "Rewinding 1-HP - 700 RPM TORQUE MOTOR", 1500, true),
+    preset("preset-almonard-fan", "Rewinding ALMONARD FAN", 1500, true),
+    preset("preset-capacitor-4", "4 MFD CAPACITOR", 70, false),
+    preset("preset-motor-1hp-1440", "Rewinding 1-HP - 1440 RPM MOTOR", 1500, false),
+    preset("preset-motor-2hp-1440", "Rewinding 2-HP - 1440 RPM MOTOR", 1920, false),
+    preset("preset-bearing-6203", "Bearing 6203", 163, false),
+    preset("preset-pvc-fan", "PVC Fan", 80, false),
+    preset("preset-waterseal", "Waterseal", 160, false),
+    preset("preset-terminal-plate", "Terminal Plate", 70, false)
   ],
   invoices: []
 };
 
-function preset(name: string, rate: number, favorite: boolean): ItemPreset {
+function preset(id: string, name: string, rate: number, favorite: boolean): ItemPreset {
   return {
-    id: uid(),
+    id,
     businessId: seedBusinessId,
     name,
     unit: "No",
