@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 
 async function queryNeon(connectionString: string, sqlQuery: string, params: unknown[] = []) {
-  const urlObj = new URL(connectionString.split("?")[0]);
-  const host = urlObj.hostname;
+  const cleanConnStr = connectionString.replace("-pooler", "");
+  const parsed = new URL(cleanConnStr.split("?")[0]);
+  const host = parsed.hostname;
 
   const response = await fetch(`https://${host}/sql`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Neon-Connection-String": connectionString
+      "Neon-Connection-String": cleanConnStr
     },
     body: JSON.stringify({ query: sqlQuery, params })
   });
@@ -32,10 +33,36 @@ export async function GET() {
   }
 
   try {
-    await queryNeon(dbUrl, "SELECT 1");
+    await queryNeon(
+      dbUrl,
+      `CREATE TABLE IF NOT EXISTS invoice_app_data (
+        id VARCHAR(50) PRIMARY KEY,
+        data JSONB NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );`
+    );
+
+    const result = await queryNeon(
+      dbUrl,
+      `SELECT data FROM invoice_app_data WHERE id = 'main_store' LIMIT 1;`
+    );
+
+    let storedData = null;
+    if (result && Array.isArray(result.rows) && result.rows.length > 0) {
+      storedData = result.rows[0].data || result.rows[0][0] || null;
+      if (typeof storedData === "string") {
+        try {
+          storedData = JSON.parse(storedData);
+        } catch {
+          // keep string or null
+        }
+      }
+    }
+
     return NextResponse.json({
       connected: true,
       mode: "neon",
+      data: storedData,
       message: "Successfully connected to Neon Postgres database!"
     });
   } catch (error) {

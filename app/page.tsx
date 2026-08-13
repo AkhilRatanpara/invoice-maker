@@ -240,6 +240,27 @@ export default function Home() {
   const [activeStep, setActiveStep] = useState<"customer" | "items" | "preview">("customer");
   const [customerMode, setCustomerMode] = useState<"select" | "direct" | "new">("select");
 
+  const [isNeonConnected, setIsNeonConnected] = useState(false);
+
+  const sanitizeData = (raw: AppData): AppData => {
+    const hasSeedBiz = raw.businesses?.some((b) => b.id === seedBusinessId);
+    const sanitizedBusinesses = hasSeedBiz
+      ? raw.businesses
+      : [...seedData.businesses, ...(raw.businesses || [])];
+    return {
+      ...seedData,
+      ...raw,
+      businesses: sanitizedBusinesses.map((b) => ({
+        ...b,
+        name: b.name || "MADHAV ELECTRICALS",
+        pin: b.pin || "1234"
+      })),
+      invoices: Array.isArray(raw.invoices) ? raw.invoices : [],
+      customers: Array.isArray(raw.customers) ? raw.customers : seedData.customers,
+      presets: Array.isArray(raw.presets) ? raw.presets : seedData.presets
+    };
+  };
+
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -247,27 +268,12 @@ export default function Home() {
       if (stored) {
         const parsedData = JSON.parse(stored) as AppData;
         if (parsedData && Array.isArray(parsedData.businesses) && parsedData.businesses.length > 0) {
-          const hasSeedBiz = parsedData.businesses.some((b) => b.id === seedBusinessId);
-          const sanitizedBusinesses = hasSeedBiz
-            ? parsedData.businesses
-            : [...seedData.businesses, ...parsedData.businesses];
-          setData({
-            ...seedData,
-            ...parsedData,
-            businesses: sanitizedBusinesses.map((b) => ({
-              ...b,
-              name: b.name || "MADHAV ELECTRICALS",
-              pin: b.pin || "1234"
-            }))
-          });
+          setData(sanitizeData(parsedData));
         }
       }
       if (session) {
         const parsedSession = JSON.parse(session) as { businessId?: string; invoiceId?: string };
-        if (parsedSession.businessId) {
-          setSelectedBusinessId(parsedSession.businessId);
-          setMode("app");
-        }
+        if (parsedSession.businessId) setSelectedBusinessId(parsedSession.businessId);
         if (parsedSession.invoiceId) setActiveInvoiceId(parsedSession.invoiceId);
       }
     } catch (err) {
@@ -276,6 +282,25 @@ export default function Home() {
     } finally {
       setReady(true);
     }
+
+    // Auto-restore latest cloud database state from Neon on load!
+    fetch("/api/db")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.connected) {
+          setIsNeonConnected(true);
+          if (
+            result.data &&
+            Array.isArray(result.data.businesses) &&
+            result.data.businesses.length > 0
+          ) {
+            const cloudData = sanitizeData(result.data);
+            setData(cloudData);
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData));
+          }
+        }
+      })
+      .catch((e) => console.warn("Neon background restore check skipped:", e));
   }, []);
 
   useEffect(() => {
@@ -283,7 +308,19 @@ export default function Home() {
     const timer = window.setTimeout(() => {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setLastSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-    }, 350);
+
+      // Auto-sync every change to Neon Database!
+      fetch("/api/db", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      })
+        .then((res) => res.json())
+        .then((res) => {
+          if (res.success) setIsNeonConnected(true);
+        })
+        .catch(() => {});
+    }, 400);
     return () => window.clearTimeout(timer);
   }, [data, ready]);
 
@@ -775,6 +812,9 @@ export default function Home() {
         <div className="header-brand">
           <Building2 size={20} />
           <span>{business.name}</span>
+          <span className="sync-tag">
+            {isNeonConnected ? "🟢 Neon Cloud Synced" : "🟡 Saved Locally"}
+          </span>
         </div>
         <button className="ghost flex-btn" onClick={logout}>
           <LogOut size={18} />
