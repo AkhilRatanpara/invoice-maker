@@ -1,20 +1,14 @@
 import { NextResponse } from "next/server";
 
 async function queryNeon(connectionString: string, sqlQuery: string, params: unknown[] = []) {
-  const cleanUrl = connectionString.split("?")[0];
-  const parsed = new URL(cleanUrl);
-  const user = parsed.username;
-  const password = parsed.password;
-  const host = parsed.hostname.replace("-pooler", "");
-  const dbName = parsed.pathname.slice(1);
+  const urlObj = new URL(connectionString.split("?")[0]);
+  const host = urlObj.hostname;
 
-  // Send request to Neon HTTP SQL API
   const response = await fetch(`https://${host}/sql`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Neon-Connection-String": `postgresql://${user}:${password}@${host}/${dbName}`,
-      Authorization: `Bearer ${password}`
+      "Neon-Connection-String": connectionString
     },
     body: JSON.stringify({ query: sqlQuery, params })
   });

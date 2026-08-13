@@ -247,7 +247,19 @@ export default function Home() {
       if (stored) {
         const parsedData = JSON.parse(stored) as AppData;
         if (parsedData && Array.isArray(parsedData.businesses) && parsedData.businesses.length > 0) {
-          setData(parsedData);
+          const hasSeedBiz = parsedData.businesses.some((b) => b.id === seedBusinessId);
+          const sanitizedBusinesses = hasSeedBiz
+            ? parsedData.businesses
+            : [...seedData.businesses, ...parsedData.businesses];
+          setData({
+            ...seedData,
+            ...parsedData,
+            businesses: sanitizedBusinesses.map((b) => ({
+              ...b,
+              name: b.name || "MADHAV ELECTRICALS",
+              pin: b.pin || "1234"
+            }))
+          });
         }
       }
       if (session) {
@@ -1578,10 +1590,16 @@ function AdminPanel({
             <p className="eyebrow">Auto saved {lastSavedAt || "now"}</p>
             <h2>Admin Portal</h2>
           </div>
-          <button className="secondary" onClick={exportBackup}>
-            <Download size={18} />
-            Backup JSON Data
-          </button>
+          <div className="topbar-actions">
+            <button className="secondary" onClick={exportBackup}>
+              <Download size={18} />
+              Backup JSON Data
+            </button>
+            <button className="secondary danger-text" onClick={logout}>
+              <LogOut size={18} />
+              Exit Admin / Logout
+            </button>
+          </div>
         </header>
 
         {tab === "business" && (
@@ -1721,6 +1739,17 @@ function AdminPanel({
               </button>
               <button className="primary" onClick={syncToNeon} disabled={isSyncing}>
                 Sync Now to Neon
+              </button>
+              <button
+                className="secondary danger-text"
+                onClick={() => {
+                  if (confirm("Reset local storage cache back to original default settings?")) {
+                    window.localStorage.clear();
+                    window.location.reload();
+                  }
+                }}
+              >
+                Reset Storage Cache
               </button>
             </div>
 
