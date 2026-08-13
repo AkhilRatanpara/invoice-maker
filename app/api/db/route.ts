@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
 
 async function queryNeon(connectionString: string, sqlQuery: string, params: unknown[] = []) {
-  const cleanConnStr = connectionString.replace("-pooler", "");
-  const parsed = new URL(cleanConnStr.split("?")[0]);
+  const directUrl = connectionString.replace("-pooler", "");
+  const parsed = new URL(directUrl.split("?")[0]);
   const host = parsed.hostname;
+  const password = parsed.password;
 
   const response = await fetch(`https://${host}/sql`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Neon-Connection-String": cleanConnStr
+      "Neon-Connection-String": directUrl,
+      Authorization: `Bearer ${password}`
     },
     body: JSON.stringify({ query: sqlQuery, params })
   });
@@ -54,7 +56,7 @@ export async function GET() {
         try {
           storedData = JSON.parse(storedData);
         } catch {
-          // keep string or null
+          // keep string
         }
       }
     }

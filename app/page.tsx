@@ -404,16 +404,33 @@ export default function Home() {
     }
   };
 
+  const saveDataAndSync = (nextData: AppData) => {
+    setData(nextData);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextData));
+      setLastSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+
+      fetch("/api/db", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextData)
+      })
+        .then((res) => res.json())
+        .then((res) => {
+          if (res.success) setIsNeonConnected(true);
+        })
+        .catch(() => {});
+    }
+  };
+
   const updateInvoice = (updater: (invoice: Invoice) => Invoice) => {
     if (!activeInvoice) return;
-    setData((current) => ({
-      ...current,
-      invoices: current.invoices.map((invoice) =>
-        invoice.id === activeInvoice.id
-          ? { ...updater(invoice), lastEdited: new Date().toISOString() }
-          : invoice
-      )
-    }));
+    const nextInvoices = data.invoices.map((invoice) =>
+      invoice.id === activeInvoice.id
+        ? { ...updater(invoice), lastEdited: new Date().toISOString() }
+        : invoice
+    );
+    saveDataAndSync({ ...data, invoices: nextInvoices });
   };
 
   const login = () => {
@@ -447,7 +464,8 @@ export default function Home() {
 
   const createFreshInvoice = () => {
     const invoice = newInvoice(business.id);
-    setData((current) => ({ ...current, invoices: [invoice, ...current.invoices] }));
+    const nextData = { ...data, invoices: [invoice, ...data.invoices] };
+    saveDataAndSync(nextData);
     setActiveInvoiceId(invoice.id);
     setActiveStep("customer");
     setViewMode("editor");
@@ -463,17 +481,16 @@ export default function Home() {
 
   const deleteInvoice = (id: string) => {
     if (!confirm("Are you sure you want to delete this invoice draft?")) return;
-    setData((current) => {
-      const remaining = current.invoices.filter((inv) => inv.id !== id);
-      return { ...current, invoices: remaining };
-    });
+    const remaining = data.invoices.filter((inv) => inv.id !== id);
+    const nextData = { ...data, invoices: remaining };
+    saveDataAndSync(nextData);
     if (activeInvoiceId === id) {
-      const remaining = data.invoices.filter((inv) => inv.id !== id && inv.businessId === business.id);
-      if (remaining.length > 0) {
-        setActiveInvoiceId(remaining[0].id);
+      const remainingBizInvoices = remaining.filter((inv) => inv.businessId === business.id);
+      if (remainingBizInvoices.length > 0) {
+        setActiveInvoiceId(remainingBizInvoices[0].id);
       } else {
         const fresh = newInvoice(business.id);
-        setData((current) => ({ ...current, invoices: [fresh, ...current.invoices] }));
+        saveDataAndSync({ ...nextData, invoices: [fresh, ...remaining] });
         setActiveInvoiceId(fresh.id);
       }
       setViewMode("dashboard");
