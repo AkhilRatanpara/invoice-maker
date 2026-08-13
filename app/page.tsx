@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ArrowLeft,
   Building2,
   Check,
   ChevronLeft,
@@ -14,7 +15,6 @@ import {
   Pencil,
   Plus,
   Printer,
-  Save,
   Search,
   Settings,
   Shield,
@@ -107,7 +107,7 @@ const SESSION_KEY = "madhav-invoice-maker-session-v1";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const uid = () => Math.random().toString(36).slice(2, 10);
-const money = (value: number) => Number.isFinite(value) ? value.toFixed(2) : "0.00";
+const money = (value: number) => (Number.isFinite(value) ? value.toFixed(2) : "0.00");
 
 const seedBusinessId = "madhav-electricals";
 
@@ -117,8 +117,7 @@ const seedData: AppData = {
     {
       id: seedBusinessId,
       name: "MADHAV ELECTRICALS",
-      address:
-        "58, Sagar Complex, At. Chhatral, Ta. Kalol, Dist. Gandhinagar-382729",
+      address: "58, Sagar Complex, At. Chhatral, Ta. Kalol, Dist. Gandhinagar-382729",
       subtitle: "(1 Phase, 3 Phase Motor Repairing & Rewinding)",
       phone: "99045 49013",
       pin: "1234",
@@ -231,6 +230,7 @@ export default function Home() {
   const [data, setData] = useState<AppData>(seedData);
   const [ready, setReady] = useState(false);
   const [mode, setMode] = useState<"login" | "app" | "admin">("login");
+  const [viewMode, setViewMode] = useState<"dashboard" | "editor">("dashboard");
   const [selectedBusinessId, setSelectedBusinessId] = useState(seedBusinessId);
   const [pin, setPin] = useState("");
   const [adminPin, setAdminPin] = useState("");
@@ -283,8 +283,12 @@ export default function Home() {
     );
   }, [ready, mode, selectedBusinessId, activeInvoiceId]);
 
-  const business = data.businesses?.find((item) => item.id === selectedBusinessId) ?? data.businesses?.[0] ?? seedData.businesses[0];
-  const invoicesForBusiness = data.invoices?.filter((invoice) => invoice.businessId === business.id) ?? [];
+  const business =
+    data.businesses?.find((item) => item.id === selectedBusinessId) ??
+    data.businesses?.[0] ??
+    seedData.businesses[0];
+  const invoicesForBusiness =
+    data.invoices?.filter((invoice) => invoice.businessId === business.id) ?? [];
   const activeInvoice =
     data.invoices?.find((invoice) => invoice.id === activeInvoiceId) ??
     invoicesForBusiness.find((invoice) => invoice.status === "draft") ??
@@ -298,14 +302,42 @@ export default function Home() {
 
   useEffect(() => {
     if (!ready || mode !== "app") return;
-    if (!activeInvoice) {
+    if (!activeInvoice && invoicesForBusiness.length === 0) {
       const invoice = newInvoice(business.id);
       setData((current) => ({ ...current, invoices: [invoice, ...current.invoices] }));
       setActiveInvoiceId(invoice.id);
-    } else if (!activeInvoiceId) {
-      setActiveInvoiceId(activeInvoice.id);
+    } else if (!activeInvoiceId && invoicesForBusiness[0]) {
+      setActiveInvoiceId(invoicesForBusiness[0].id);
     }
-  }, [activeInvoice, activeInvoiceId, business.id, mode, ready]);
+  }, [activeInvoice, activeInvoiceId, business.id, invoicesForBusiness, mode, ready]);
+
+  // Handle phone & browser back button
+  useEffect(() => {
+    if (mode !== "app") return;
+    const handlePopState = (e: PopStateEvent) => {
+      const state = e.state;
+      if (state && state.viewMode === "editor") {
+        setViewMode("editor");
+        if (state.step) setActiveStep(state.step);
+      } else if (state && state.viewMode === "dashboard") {
+        setViewMode("dashboard");
+      } else {
+        if (viewMode === "editor") {
+          if (activeStep === "preview") setActiveStep("items");
+          else if (activeStep === "items") setActiveStep("customer");
+          else setViewMode("dashboard");
+        }
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [mode, viewMode, activeStep]);
+
+  const pushState = (view: "dashboard" | "editor", step?: "customer" | "items" | "preview") => {
+    if (typeof window !== "undefined") {
+      window.history.pushState({ viewMode: view, step: step || activeStep }, "");
+    }
+  };
 
   const updateInvoice = (updater: (invoice: Invoice) => Invoice) => {
     if (!activeInvoice) return;
@@ -322,11 +354,12 @@ export default function Home() {
   const login = () => {
     if (pin === business.pin) {
       setMode("app");
+      setViewMode("dashboard");
       setPin("");
       setPinError("");
       return;
     }
-    setPinError("Wrong PIN. Please ask admin.");
+    setPinError("Wrong PIN. Please try again.");
   };
 
   const adminLogin = () => {
@@ -352,25 +385,34 @@ export default function Home() {
     setData((current) => ({ ...current, invoices: [invoice, ...current.invoices] }));
     setActiveInvoiceId(invoice.id);
     setActiveStep("customer");
+    setViewMode("editor");
+    pushState("editor", "customer");
+  };
+
+  const openInvoiceForEdit = (invoiceId: string) => {
+    setActiveInvoiceId(invoiceId);
+    setActiveStep("customer");
+    setViewMode("editor");
+    pushState("editor", "customer");
   };
 
   const deleteInvoice = (id: string) => {
     if (!confirm("Are you sure you want to delete this invoice draft?")) return;
     setData((current) => {
       const remaining = current.invoices.filter((inv) => inv.id !== id);
-      const nextActive = activeInvoiceId === id
-        ? remaining.find((inv) => inv.businessId === business.id)?.id || ""
-        : activeInvoiceId;
       return { ...current, invoices: remaining };
     });
     if (activeInvoiceId === id) {
-      const remaining = data.invoices.filter((inv) => inv.id !== id);
-      const next = remaining.find((inv) => inv.businessId === business.id);
-      if (next) {
-        setActiveInvoiceId(next.id);
+      const remaining = data.invoices.filter((inv) => inv.id !== id && inv.businessId === business.id);
+      if (remaining.length > 0) {
+        setActiveInvoiceId(remaining[0].id);
       } else {
-        createFreshInvoice();
+        const fresh = newInvoice(business.id);
+        setData((current) => ({ ...current, invoices: [fresh, ...current.invoices] }));
+        setActiveInvoiceId(fresh.id);
       }
+      setViewMode("dashboard");
+      pushState("dashboard");
     }
   };
 
@@ -680,7 +722,7 @@ export default function Home() {
           <details className="admin-login">
             <summary>
               <Shield size={16} />
-              Admin login
+              Admin Login (Only)
             </summary>
             <input
               className="input pin-input"
@@ -693,7 +735,7 @@ export default function Home() {
             />
             <button className="secondary wide" onClick={adminLogin}>
               <Settings size={18} />
-              Open Admin
+              Open Admin Portal
             </button>
           </details>
         </section>
@@ -714,457 +756,591 @@ export default function Home() {
     );
   }
 
-  if (!activeInvoice) {
-    return <main className="center-screen">Preparing invoice...</main>;
-  }
-
+  // --- BUSINESS APPLICATION MODE ---
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div>
-          <div className="business-chip">
-            <Building2 size={18} />
-            <span>{business.name}</span>
-          </div>
-          <button className="primary wide" onClick={createFreshInvoice}>
-            <Plus size={18} />
-            New Invoice
-          </button>
+    <main className="app-shell-clean">
+      <header className="app-header-bar">
+        <div className="header-brand">
+          <Building2 size={20} />
+          <span>{business.name}</span>
         </div>
-
-        <nav className="step-list">
-          {[
-            ["customer", "Customer"],
-            ["items", "Items"],
-            ["preview", "Preview"]
-          ].map(([id, label]) => (
-            <button
-              key={id}
-              className={activeStep === id ? "step active" : "step"}
-              onClick={() => setActiveStep(id as typeof activeStep)}
-            >
-              <span>{label}</span>
-              {id === "preview" && <span>Rs. {money(invoiceTotal(activeInvoice))}</span>}
-            </button>
-          ))}
-        </nav>
-
-        <div className="saved-list">
-          <p className="sidebar-title">Saved Drafts</p>
-          {invoicesForBusiness.slice(0, 8).map((invoice) => (
-            <div key={invoice.id} className="draft-row">
-              <button
-                className={invoice.id === activeInvoice.id ? "invoice-pill active" : "invoice-pill"}
-                onClick={() => setActiveInvoiceId(invoice.id)}
-              >
-                <span>{invoice.customerName || "New customer"}</span>
-                <small>{invoice.date}</small>
-              </button>
-              <button
-                className="icon-button danger draft-delete"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteInvoice(invoice.id);
-                }}
-                title="Delete Draft"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <button className="ghost wide" onClick={logout}>
+        <button className="ghost flex-btn" onClick={logout}>
           <LogOut size={18} />
-          Lock
+          <span>Exit Business</span>
         </button>
-      </aside>
+      </header>
 
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Auto saved {lastSavedAt || "now"}</p>
-            <h2>{activeStep === "customer" ? "Customer Details" : activeStep === "items" ? "Add Work Items" : "Preview & Download"}</h2>
-          </div>
-          <div className="topbar-actions">
-            {activeInvoice && (
-              <button
-                className="secondary danger-text"
-                onClick={() => deleteInvoice(activeInvoice.id)}
-                title="Delete current draft"
-              >
-                <Trash2 size={17} />
-                Delete Draft
-              </button>
-            )}
-            <button className="secondary" onClick={() => setMode("admin")}>
-              <Settings size={18} />
-              Admin
+      {viewMode === "dashboard" ? (
+        <section className="dashboard-container">
+          <div className="dashboard-hero">
+            <div>
+              <h2>Invoice Dashboard</h2>
+              <p className="muted">Create new bills or manage saved drafts for {business.name}</p>
+            </div>
+            <button className="primary hero-btn" onClick={createFreshInvoice}>
+              <Plus size={20} />
+              Create New Invoice
             </button>
           </div>
-        </header>
 
-        {activeStep === "customer" && (
-          <section className="editor-panel">
-            <div className="segmented">
+          <div className="drafts-section">
+            <h3>Saved Invoices & Drafts ({invoicesForBusiness.length})</h3>
+
+            {invoicesForBusiness.length === 0 ? (
+              <div className="empty-card">
+                <FileText size={40} />
+                <p>No invoices created yet. Tap below to start!</p>
+                <button className="primary" onClick={createFreshInvoice}>
+                  <Plus size={18} />
+                  Create First Invoice
+                </button>
+              </div>
+            ) : (
+              <div className="drafts-grid">
+                {invoicesForBusiness.map((invoice) => (
+                  <div
+                    key={invoice.id}
+                    className={
+                      activeInvoice && invoice.id === activeInvoice.id
+                        ? "draft-card active"
+                        : "draft-card"
+                    }
+                  >
+                    <div className="card-top">
+                      <div>
+                        <h4>{invoice.customerName || "New Customer"}</h4>
+                        {invoice.customerDescription && (
+                          <span className="card-sub">{invoice.customerDescription}</span>
+                        )}
+                      </div>
+                      <span className="card-date">{invoice.date}</span>
+                    </div>
+
+                    <div className="card-total-row">
+                      <span>Total Amount</span>
+                      <strong>Rs. {money(invoiceTotal(invoice))}</strong>
+                    </div>
+
+                    <div className="card-actions">
+                      <button
+                        className="primary flex-1"
+                        onClick={() => openInvoiceForEdit(invoice.id)}
+                      >
+                        <Pencil size={16} />
+                        Edit Invoice
+                      </button>
+                      <button
+                        className="secondary"
+                        onClick={() => {
+                          setActiveInvoiceId(invoice.id);
+                          exportPdf();
+                        }}
+                        title="Download PDF"
+                      >
+                        <Printer size={16} />
+                      </button>
+                      <button
+                        className="secondary danger-text"
+                        onClick={() => deleteInvoice(invoice.id)}
+                        title="Delete Invoice"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      ) : (
+        /* --- EDITOR VIEW --- */
+        <section className="editor-container">
+          <div className="editor-top-nav">
+            <button className="secondary flex-btn" onClick={() => {
+              setViewMode("dashboard");
+              pushState("dashboard");
+            }}>
+              <ArrowLeft size={18} />
+              <span>Back to Dashboard</span>
+            </button>
+
+            <div className="editor-step-tabs">
               {[
-                ["select", "Select"],
-                ["direct", "Direct Fill"],
-                ["new", "New Customer"]
+                ["customer", "1. Customer"],
+                ["items", "2. Work Items"],
+                ["preview", "3. Preview & Print"]
               ].map(([id, label]) => (
                 <button
                   key={id}
-                  className={customerMode === id ? "active" : ""}
-                  onClick={() => setCustomerMode(id as typeof customerMode)}
+                  className={activeStep === id ? "tab active" : "tab"}
+                  onClick={() => {
+                    setActiveStep(id as typeof activeStep);
+                    pushState("editor", id as typeof activeStep);
+                  }}
                 >
                   {label}
                 </button>
               ))}
             </div>
 
-            {customerMode === "select" && (
-              <div className="grid two">
-                <label>
-                  <span className="field-label">Saved customer</span>
-                  <select
-                    className="input"
-                    value={activeInvoice.customerId ?? ""}
-                    onChange={(event) => {
-                      const customer = customers.find((item) => item.id === event.target.value);
-                      if (!customer) return;
-                      updateInvoice((invoice) => ({
-                        ...invoice,
-                        customerId: customer.id,
-                        customerName: customer.name,
-                        customerDescription: customer.description
-                      }));
-                    }}
-                  >
-                    <option value="">Choose customer</option>
-                    {customers.map((customer) => (
-                      <option key={customer.id} value={customer.id}>
-                        {customer.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span className="field-label">Invoice date</span>
-                  <input
-                    className="input"
-                    type="date"
-                    value={activeInvoice.date}
-                    onChange={(event) =>
-                      updateInvoice((invoice) => ({ ...invoice, date: event.target.value }))
-                    }
-                  />
-                </label>
-              </div>
-            )}
-
-            {(customerMode === "direct" || customerMode === "new") && (
-              <div className="grid two">
-                <label>
-                  <span className="field-label">Customer name</span>
-                  <input
-                    className="input"
-                    value={activeInvoice.customerName}
-                    onChange={(event) =>
-                      updateInvoice((invoice) => ({ ...invoice, customerName: event.target.value }))
-                    }
-                    placeholder="RAAJRATNA METAL INDUSTRIES Limited"
-                  />
-                </label>
-                <label>
-                  <span className="field-label">Invoice date</span>
-                  <input
-                    className="input"
-                    type="date"
-                    value={activeInvoice.date}
-                    onChange={(event) =>
-                      updateInvoice((invoice) => ({ ...invoice, date: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="span-two">
-                  <span className="field-label">Customer description</span>
-                  <input
-                    className="input"
-                    value={activeInvoice.customerDescription}
-                    onChange={(event) =>
-                      updateInvoice((invoice) => ({
-                        ...invoice,
-                        customerDescription: event.target.value
-                      }))
-                    }
-                    placeholder="(Fine Wire Division, Bileshwarpura)"
-                  />
-                </label>
-              </div>
-            )}
-
-            {customerMode === "new" && (
-              <button className="secondary" onClick={saveCustomerFromInvoice}>
-                <UserPlus size={18} />
-                Save Customer
+            {activeInvoice && (
+              <button
+                className="secondary danger-text flex-btn"
+                onClick={() => deleteInvoice(activeInvoice.id)}
+              >
+                <Trash2 size={16} />
+                <span>Delete Draft</span>
               </button>
             )}
+          </div>
 
-            <button className="primary next-button" onClick={() => setActiveStep("items")}>
-              Continue to Items
-            </button>
-          </section>
-        )}
-
-        {activeStep === "items" && (
-          <section className="editor-panel item-editor">
-            <div className="quick-row">
-              {favoritePresets.map((item) => (
-                <button
-                  key={item.id}
-                  className="quick-item"
-                  onClick={() => {
-                    const firstEmpty = activeInvoice.groups
-                      .flatMap((group) => group.rows)
-                      .find((row) => !row.description);
-                    if (firstEmpty) {
-                      applyPreset(firstEmpty.id, item);
-                    } else {
-                      updateInvoice((invoice) => ({
-                        ...invoice,
-                        groups: [
-                          ...invoice.groups,
-                          {
-                            id: uid(),
-                            srNo: invoice.groups.length + 1,
-                            rows: [
-                              {
-                                id: uid(),
-                                description: item.name,
-                                qty: 1,
-                                unit: item.unit,
-                                rate: item.rate
-                              }
-                            ]
-                          }
-                        ]
-                      }));
-                    }
-                  }}
-                >
-                  <Plus size={16} />
-                  {item.name}
-                </button>
-              ))}
-            </div>
-
-            <datalist id="item-presets">
-              {visiblePresets.map((item) => (
-                <option key={item.id} value={item.name} />
-              ))}
-            </datalist>
-
-            <div className="items-table">
-              <div className="table-head">
-                <span>Sr.</span>
-                <span>Particulars / Description</span>
-                <span>Qty</span>
-                <span>Rate</span>
-                <span>Total</span>
-                <span />
-              </div>
-              {activeInvoice.groups.map((group) => (
-                <div key={group.id} className="group-block">
-                  {group.rows.map((row, rowIndex) => (
-                    <div key={row.id} className="item-row">
-                      <div className="sr-box">{rowIndex === 0 ? group.srNo : ""}</div>
-                      <div className="description-cell">
-                        <span className="mobile-label">Particulars / Description</span>
-                        <div className="search-wrap">
-                          <Search size={15} />
-                          <input
-                            list="item-presets"
-                            value={row.description}
-                            onBlur={() => {
-                              const found = visiblePresets.find(
-                                (item) => item.name.toLowerCase() === row.description.toLowerCase()
-                              );
-                              if (found) applyPreset(row.id, found);
-                            }}
-                            onChange={(event) =>
-                              updateInvoice((invoice) => ({
-                                ...invoice,
-                                groups: invoice.groups.map((invoiceGroup) =>
-                                  invoiceGroup.id === group.id
-                                    ? {
-                                        ...invoiceGroup,
-                                        rows: invoiceGroup.rows.map((itemRow) =>
-                                          itemRow.id === row.id
-                                            ? { ...itemRow, description: event.target.value }
-                                            : itemRow
-                                        )
-                                      }
-                                    : invoiceGroup
-                                )
-                              }))
-                            }
-                            placeholder="Type or choose item"
-                          />
-                        </div>
-                      </div>
-                      <div className="qty-cell">
-                        <span className="mobile-label">Qty & Unit</span>
-                        <div className="qty-inputs">
-                          <input
-                            type="number"
-                            min="0"
-                            value={row.qty}
-                            onChange={(event) =>
-                              updateInvoice((invoice) => ({
-                                ...invoice,
-                                groups: invoice.groups.map((invoiceGroup) =>
-                                  invoiceGroup.id === group.id
-                                    ? {
-                                        ...invoiceGroup,
-                                        rows: invoiceGroup.rows.map((itemRow) =>
-                                          itemRow.id === row.id
-                                            ? { ...itemRow, qty: Number(event.target.value) }
-                                            : itemRow
-                                        )
-                                      }
-                                    : invoiceGroup
-                                )
-                              }))
-                            }
-                          />
-                          <input
-                            value={row.unit}
-                            onChange={(event) =>
-                              updateInvoice((invoice) => ({
-                                ...invoice,
-                                groups: invoice.groups.map((invoiceGroup) =>
-                                  invoiceGroup.id === group.id
-                                    ? {
-                                        ...invoiceGroup,
-                                        rows: invoiceGroup.rows.map((itemRow) =>
-                                          itemRow.id === row.id
-                                            ? { ...itemRow, unit: event.target.value }
-                                            : itemRow
-                                        )
-                                      }
-                                    : invoiceGroup
-                                )
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-                      <div className="rate-cell">
-                        <span className="mobile-label">Rate (Rs.)</span>
-                        <input
-                          className="money-input"
-                          type="number"
-                          min="0"
-                          value={row.rate}
-                          onChange={(event) =>
-                            updateInvoice((invoice) => ({
-                              ...invoice,
-                              groups: invoice.groups.map((invoiceGroup) =>
-                                invoiceGroup.id === group.id
-                                  ? {
-                                      ...invoiceGroup,
-                                      rows: invoiceGroup.rows.map((itemRow) =>
-                                        itemRow.id === row.id
-                                          ? {
-                                              ...itemRow,
-                                              rate: Number(event.target.value),
-                                              amountOverride: undefined
-                                            }
-                                          : itemRow
-                                      )
-                                    }
-                                  : invoiceGroup
-                              )
-                            }))
-                          }
-                        />
-                      </div>
-                      <div className="amount-cell">
-                        <span className="mobile-label">Amount (Rs.)</span>
-                        <input
-                          className="money-input"
-                          type="number"
-                          min="0"
-                          value={money(rowAmount(row))}
-                          onChange={(event) =>
-                            updateInvoice((invoice) => ({
-                              ...invoice,
-                              groups: invoice.groups.map((invoiceGroup) =>
-                                invoiceGroup.id === group.id
-                                  ? {
-                                      ...invoiceGroup,
-                                      rows: invoiceGroup.rows.map((itemRow) =>
-                                        itemRow.id === row.id
-                                          ? { ...itemRow, amountOverride: Number(event.target.value) }
-                                          : itemRow
-                                      )
-                                    }
-                                  : invoiceGroup
-                              )
-                            }))
-                          }
-                        />
-                      </div>
-                      <button className="icon-button danger" onClick={() => deleteRow(group.id, row.id)}>
-                        <Trash2 size={17} />
+          {!activeInvoice ? (
+            <div className="center-screen">Preparing invoice editor...</div>
+          ) : (
+            <div className="editor-content-area">
+              {activeStep === "customer" && (
+                <section className="editor-panel">
+                  <h3>Customer Details</h3>
+                  <div className="segmented">
+                    {[
+                      ["select", "Select Saved"],
+                      ["direct", "Direct Fill (Quick)"],
+                      ["new", "New Customer"]
+                    ].map(([id, label]) => (
+                      <button
+                        key={id}
+                        className={customerMode === id ? "active" : ""}
+                        onClick={() => setCustomerMode(id as typeof customerMode)}
+                      >
+                        {label}
                       </button>
+                    ))}
+                  </div>
+
+                  {customerMode === "select" && (
+                    <div className="grid two">
+                      <label>
+                        <span className="field-label">Saved Customer</span>
+                        <select
+                          className="input"
+                          value={activeInvoice.customerId ?? ""}
+                          onChange={(event) => {
+                            const customer = customers.find(
+                              (item) => item.id === event.target.value
+                            );
+                            if (!customer) return;
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerId: customer.id,
+                              customerName: customer.name,
+                              customerDescription: customer.description
+                            }));
+                          }}
+                        >
+                          <option value="">Choose customer</option>
+                          {customers.map((customer) => (
+                            <option key={customer.id} value={customer.id}>
+                              {customer.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span className="field-label">Invoice Date</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={activeInvoice.date}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({ ...invoice, date: event.target.value }))
+                          }
+                        />
+                      </label>
                     </div>
-                  ))}
-                  <button className="small-action" onClick={() => addSubItem(group.id)}>
-                    <Plus size={16} />
-                    Add sub item under Sr. {group.srNo}
-                  </button>
-                </div>
-              ))}
-            </div>
+                  )}
 
-            <div className="bottom-actions">
-              <button className="secondary" onClick={addGroup}>
-                <Plus size={18} />
-                Add New Sr. No.
-              </button>
-              <div className="total-box">Total Rs. {money(invoiceTotal(activeInvoice))}</div>
-              <button className="primary" onClick={() => setActiveStep("preview")}>
-                Preview
-              </button>
-            </div>
-          </section>
-        )}
+                  {(customerMode === "direct" || customerMode === "new") && (
+                    <div className="grid two">
+                      <label>
+                        <span className="field-label">Customer Name</span>
+                        <input
+                          className="input"
+                          value={activeInvoice.customerName}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerName: event.target.value
+                            }))
+                          }
+                          placeholder="RAAJRATNA METAL INDUSTRIES Limited"
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">Invoice Date</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={activeInvoice.date}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({ ...invoice, date: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="span-two">
+                        <span className="field-label">Customer Description Sub-line</span>
+                        <input
+                          className="input"
+                          value={activeInvoice.customerDescription}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerDescription: event.target.value
+                            }))
+                          }
+                          placeholder="(Fine Wire Division, Bileshwarpura)"
+                        />
+                      </label>
+                    </div>
+                  )}
 
-        {activeStep === "preview" && (
-          <section className="preview-layout">
-            <InvoicePreview business={business} invoice={activeInvoice} />
-            <div className="download-panel">
-              <button className="primary wide" onClick={exportPdf}>
-                <Printer size={18} />
-                Download PDF
-              </button>
-              <button className="secondary wide" onClick={exportExcel}>
-                <FileSpreadsheet size={18} />
-                Download Excel
-              </button>
-              <button className="secondary wide" onClick={exportWord}>
-                <FileText size={18} />
-                Download Word
-              </button>
-              <button className="ghost wide" onClick={() => setActiveStep("items")}>
-                <ChevronLeft size={18} />
-                Edit Items
-              </button>
+                  {customerMode === "new" && (
+                    <button className="secondary" onClick={saveCustomerFromInvoice}>
+                      <UserPlus size={18} />
+                      Save Customer to Database
+                    </button>
+                  )}
+
+                  <div className="step-footer">
+                    <button
+                      className="primary next-button"
+                      onClick={() => {
+                        setActiveStep("items");
+                        pushState("editor", "items");
+                      }}
+                    >
+                      Continue to Work Items →
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {activeStep === "items" && (
+                <section className="editor-panel item-editor">
+                  <div className="preset-bar">
+                    <span>Quick Add Preset Items:</span>
+                    <div className="quick-row">
+                      {favoritePresets.map((item) => (
+                        <button
+                          key={item.id}
+                          className="quick-item"
+                          onClick={() => {
+                            const firstEmpty = activeInvoice.groups
+                              .flatMap((group) => group.rows)
+                              .find((row) => !row.description);
+                            if (firstEmpty) {
+                              applyPreset(firstEmpty.id, item);
+                            } else {
+                              updateInvoice((invoice) => ({
+                                ...invoice,
+                                groups: [
+                                  ...invoice.groups,
+                                  {
+                                    id: uid(),
+                                    srNo: invoice.groups.length + 1,
+                                    rows: [
+                                      {
+                                        id: uid(),
+                                        description: item.name,
+                                        qty: 1,
+                                        unit: item.unit,
+                                        rate: item.rate
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }));
+                            }
+                          }}
+                        >
+                          <Plus size={15} />
+                          {item.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <datalist id="item-presets">
+                    {visiblePresets.map((item) => (
+                      <option key={item.id} value={item.name} />
+                    ))}
+                  </datalist>
+
+                  <datalist id="unit-presets">
+                    <option value="No" />
+                    <option value="Pcs" />
+                    <option value="Kg" />
+                    <option value="Mtr" />
+                    <option value="Set" />
+                    <option value="Hrs" />
+                    <option value="Bags" />
+                    <option value="Box" />
+                    <option value="Ltr" />
+                  </datalist>
+
+                  <div className="items-table">
+                    <div className="table-head">
+                      <span>Sr.</span>
+                      <span>Particulars / Description</span>
+                      <span>Qty</span>
+                      <span>Unit</span>
+                      <span>Rate (Rs.)</span>
+                      <span>Total Amount (Rs.)</span>
+                      <span />
+                    </div>
+                    {activeInvoice.groups.map((group) => (
+                      <div key={group.id} className="group-block">
+                        {group.rows.map((row, rowIndex) => (
+                          <div key={row.id} className="item-row">
+                            <div className="sr-box">
+                              {rowIndex === 0 ? `Sr. ${group.srNo}` : "Sub-item"}
+                            </div>
+                            <div className="description-cell">
+                              <span className="mobile-label">Particulars / Description</span>
+                              <div className="search-wrap">
+                                <Search size={15} />
+                                <input
+                                  list="item-presets"
+                                  value={row.description}
+                                  onBlur={() => {
+                                    const found = visiblePresets.find(
+                                      (item) =>
+                                        item.name.toLowerCase() === row.description.toLowerCase()
+                                    );
+                                    if (found) applyPreset(row.id, found);
+                                  }}
+                                  onChange={(event) =>
+                                    updateInvoice((invoice) => ({
+                                      ...invoice,
+                                      groups: invoice.groups.map((invoiceGroup) =>
+                                        invoiceGroup.id === group.id
+                                          ? {
+                                              ...invoiceGroup,
+                                              rows: invoiceGroup.rows.map((itemRow) =>
+                                                itemRow.id === row.id
+                                                  ? { ...itemRow, description: event.target.value }
+                                                  : itemRow
+                                              )
+                                            }
+                                          : invoiceGroup
+                                      )
+                                    }))
+                                  }
+                                  placeholder="Type item description..."
+                                />
+                              </div>
+                            </div>
+
+                            <div className="qty-cell">
+                              <span className="mobile-label">Qty</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={row.qty === 0 ? "" : row.qty}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(event) =>
+                                  updateInvoice((invoice) => ({
+                                    ...invoice,
+                                    groups: invoice.groups.map((invoiceGroup) =>
+                                      invoiceGroup.id === group.id
+                                        ? {
+                                            ...invoiceGroup,
+                                            rows: invoiceGroup.rows.map((itemRow) =>
+                                              itemRow.id === row.id
+                                                ? {
+                                                    ...itemRow,
+                                                    qty:
+                                                      event.target.value === ""
+                                                        ? 0
+                                                        : Number(event.target.value)
+                                                  }
+                                                : itemRow
+                                            )
+                                          }
+                                        : invoiceGroup
+                                    )
+                                  }))
+                                }
+                                placeholder="1"
+                              />
+                            </div>
+
+                            <div className="unit-cell">
+                              <span className="mobile-label">Unit</span>
+                              <input
+                                list="unit-presets"
+                                value={row.unit}
+                                onChange={(event) =>
+                                  updateInvoice((invoice) => ({
+                                    ...invoice,
+                                    groups: invoice.groups.map((invoiceGroup) =>
+                                      invoiceGroup.id === group.id
+                                        ? {
+                                            ...invoiceGroup,
+                                            rows: invoiceGroup.rows.map((itemRow) =>
+                                              itemRow.id === row.id
+                                                ? { ...itemRow, unit: event.target.value }
+                                                : itemRow
+                                            )
+                                          }
+                                        : invoiceGroup
+                                    )
+                                  }))
+                                }
+                                placeholder="No"
+                              />
+                            </div>
+
+                            <div className="rate-cell">
+                              <span className="mobile-label">Rate (Rs.)</span>
+                              <input
+                                className="money-input"
+                                type="number"
+                                min="0"
+                                value={row.rate === 0 ? "" : row.rate}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(event) =>
+                                  updateInvoice((invoice) => ({
+                                    ...invoice,
+                                    groups: invoice.groups.map((invoiceGroup) =>
+                                      invoiceGroup.id === group.id
+                                        ? {
+                                            ...invoiceGroup,
+                                            rows: invoiceGroup.rows.map((itemRow) =>
+                                              itemRow.id === row.id
+                                                ? {
+                                                    ...itemRow,
+                                                    rate:
+                                                      event.target.value === ""
+                                                        ? 0
+                                                        : Number(event.target.value),
+                                                    amountOverride: undefined
+                                                  }
+                                                : itemRow
+                                            )
+                                          }
+                                        : invoiceGroup
+                                    )
+                                  }))
+                                }
+                                placeholder="0.00"
+                              />
+                            </div>
+
+                            <div className="amount-cell">
+                              <span className="mobile-label">Total Amount (Rs.)</span>
+                              <input
+                                className="money-input"
+                                type="number"
+                                min="0"
+                                value={rowAmount(row) === 0 ? "" : rowAmount(row)}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(event) =>
+                                  updateInvoice((invoice) => ({
+                                    ...invoice,
+                                    groups: invoice.groups.map((invoiceGroup) =>
+                                      invoiceGroup.id === group.id
+                                        ? {
+                                            ...invoiceGroup,
+                                            rows: invoiceGroup.rows.map((itemRow) =>
+                                              itemRow.id === row.id
+                                                ? {
+                                                    ...itemRow,
+                                                    amountOverride:
+                                                      event.target.value === ""
+                                                        ? 0
+                                                        : Number(event.target.value)
+                                                  }
+                                                : itemRow
+                                            )
+                                          }
+                                        : invoiceGroup
+                                    )
+                                  }))
+                                }
+                                placeholder="0.00"
+                              />
+                            </div>
+
+                            <button
+                              className="icon-button danger"
+                              onClick={() => deleteRow(group.id, row.id)}
+                              title="Delete Row"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        ))}
+                        <button className="small-action" onClick={() => addSubItem(group.id)}>
+                          <Plus size={15} />
+                          Add Sub-item under Sr. {group.srNo}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bottom-actions">
+                    <button className="secondary" onClick={addGroup}>
+                      <Plus size={18} />
+                      Add New Main Item (Sr. {activeInvoice.groups.length + 1})
+                    </button>
+                    <div className="total-box">Grand Total: Rs. {money(invoiceTotal(activeInvoice))}</div>
+                    <button
+                      className="primary"
+                      onClick={() => {
+                        setActiveStep("preview");
+                        pushState("editor", "preview");
+                      }}
+                    >
+                      Continue to Preview →
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {activeStep === "preview" && (
+                <section className="preview-layout">
+                  <InvoicePreview business={business} invoice={activeInvoice} />
+                  <div className="download-panel">
+                    <button className="primary wide" onClick={exportPdf}>
+                      <Printer size={18} />
+                      Download PDF
+                    </button>
+                    <button className="secondary wide" onClick={exportExcel}>
+                      <FileSpreadsheet size={18} />
+                      Download Excel
+                    </button>
+                    <button className="secondary wide" onClick={exportWord}>
+                      <FileText size={18} />
+                      Download Word
+                    </button>
+                    <button
+                      className="ghost wide"
+                      onClick={() => {
+                        setActiveStep("items");
+                        pushState("editor", "items");
+                      }}
+                    >
+                      <ChevronLeft size={18} />
+                      Back to Edit Items
+                    </button>
+                  </div>
+                </section>
+              )}
             </div>
-          </section>
-        )}
-      </section>
+          )}
+        </section>
+      )}
     </main>
   );
 }
@@ -1205,7 +1381,9 @@ function InvoicePreview({ business, invoice }: { business: Business; invoice: In
               <tr key={row.id}>
                 <td>{index === 0 ? group.srNo : ""}</td>
                 <td>{row.description}</td>
-                <td>{row.qty} {row.unit}</td>
+                <td>
+                  {row.qty} {row.unit}
+                </td>
                 <td>{money(row.rate)}</td>
                 <td>{money(rowAmount(row))}</td>
               </tr>
@@ -1239,7 +1417,8 @@ function AdminPanel({
   const [tab, setTab] = useState<"business" | "items" | "customers" | "database">("business");
   const [dbStatus, setDbStatus] = useState<string>("Local Storage Mode (Offline / Free)");
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const business = data.businesses.find((item) => item.id === selectedBusinessId) ?? data.businesses[0];
+  const business =
+    data.businesses.find((item) => item.id === selectedBusinessId) ?? data.businesses[0];
   const items = data.presets.filter((item) => item.businessId === business.id);
   const customers = data.customers.filter((customer) => customer.businessId === business.id);
 
@@ -1275,7 +1454,7 @@ function AdminPanel({
       } else {
         alert(result.message || "DATABASE_URL is not set on Vercel yet. Saving locally.");
       }
-    } catch (err) {
+    } catch {
       alert("Sync failed. Check connection or DATABASE_URL setting.");
     } finally {
       setIsSyncing(false);
@@ -1354,7 +1533,7 @@ function AdminPanel({
       <aside className="sidebar">
         <div className="business-chip">
           <Shield size={18} />
-          <span>Admin</span>
+          <span>Admin Portal</span>
         </div>
         <select
           className="input"
@@ -1369,14 +1548,14 @@ function AdminPanel({
         </select>
         <button className="secondary wide" onClick={addBusiness}>
           <Plus size={18} />
-          Add Business
+          Add New Business
         </button>
         <nav className="step-list">
           {[
-            ["business", "Business"],
-            ["items", "Items"],
-            ["customers", "Customers"],
-            ["database", "Database"]
+            ["business", "Business Header"],
+            ["items", "Items & Rates"],
+            ["customers", "Saved Customers"],
+            ["database", "Neon Database Sync"]
           ].map(([id, label]) => (
             <button
               key={id}
@@ -1389,7 +1568,7 @@ function AdminPanel({
         </nav>
         <button className="ghost wide" onClick={logout}>
           <LogOut size={18} />
-          Lock
+          Exit Admin
         </button>
       </aside>
 
@@ -1401,15 +1580,16 @@ function AdminPanel({
           </div>
           <button className="secondary" onClick={exportBackup}>
             <Download size={18} />
-            Backup
+            Backup JSON Data
           </button>
         </header>
 
         {tab === "business" && (
           <section className="editor-panel">
+            <h3>Business Details & Header Settings</h3>
             <div className="grid two">
               <label>
-                <span className="field-label">Business name</span>
+                <span className="field-label">Business Name</span>
                 <input
                   className="input"
                   value={business.name}
@@ -1417,7 +1597,7 @@ function AdminPanel({
                 />
               </label>
               <label>
-                <span className="field-label">4 digit PIN</span>
+                <span className="field-label">Business 4-digit PIN</span>
                 <input
                   className="input pin-input"
                   inputMode="numeric"
@@ -1427,7 +1607,7 @@ function AdminPanel({
                 />
               </label>
               <label className="span-two">
-                <span className="field-label">Address</span>
+                <span className="field-label">Header Address</span>
                 <input
                   className="input"
                   value={business.address}
@@ -1435,7 +1615,7 @@ function AdminPanel({
                 />
               </label>
               <label>
-                <span className="field-label">Business line</span>
+                <span className="field-label">Header Business Line / Subtitle</span>
                 <input
                   className="input"
                   value={business.subtitle}
@@ -1443,7 +1623,7 @@ function AdminPanel({
                 />
               </label>
               <label>
-                <span className="field-label">Phone</span>
+                <span className="field-label">Mobile Number</span>
                 <input
                   className="input"
                   value={business.phone}
@@ -1451,7 +1631,7 @@ function AdminPanel({
                 />
               </label>
               <label>
-                <span className="field-label">Admin PIN</span>
+                <span className="field-label">Admin Portal PIN</span>
                 <input
                   className="input pin-input"
                   inputMode="numeric"
@@ -1472,10 +1652,10 @@ function AdminPanel({
         {tab === "items" && (
           <section className="editor-panel">
             <div className="panel-toolbar">
-              <h3>Items & Rates</h3>
+              <h3>Preset Items & Default Rates</h3>
               <button className="primary" onClick={addPreset}>
                 <Plus size={18} />
-                Add Item
+                Add Item Preset
               </button>
             </div>
             <div className="admin-list">
@@ -1500,7 +1680,7 @@ function AdminPanel({
                   <button
                     className={item.favorite ? "icon-button selected" : "icon-button"}
                     onClick={() => updatePreset(item.id, { favorite: !item.favorite })}
-                    title="Show as quick item"
+                    title="Show as quick add preset"
                   >
                     <Check size={17} />
                   </button>
@@ -1547,14 +1727,18 @@ function AdminPanel({
             <div className="db-info">
               <h4>How Neon Database Works:</h4>
               <p>
-                By default, your app runs <strong>100% free</strong> in browser LocalStorage. 
-                If you want 2-3 users on different phones/computers to share the exact same customers and invoices:
+                By default, your app runs <strong>100% free</strong> in browser LocalStorage.
+                If you want 2-3 users on different devices to share invoices in real time:
               </p>
               <ol>
-                <li>Create a free account at <a href="https://neon.tech" target="_blank" rel="noreferrer">neon.tech</a> (Free Postgres).</li>
-                <li>Copy your Postgres Connection String (`postgresql://...`).</li>
-                <li>Add variable `DATABASE_URL` in your <strong>Vercel Project Settings -&gt; Environment Variables</strong>.</li>
-                <li>Your app will automatically detect Neon and sync all invoices across all devices!</li>
+                <li>
+                  Create a free account at{" "}
+                  <a href="https://neon.tech" target="_blank" rel="noreferrer">
+                    neon.tech
+                  </a>
+                </li>
+                <li>Copy your Postgres Connection String.</li>
+                <li>Add variable `DATABASE_URL` in Vercel Project Settings -&gt; Environment Variables.</li>
               </ol>
             </div>
           </section>
