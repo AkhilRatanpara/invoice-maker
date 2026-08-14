@@ -305,6 +305,8 @@ type AppData = {
   customers: Customer[];
   presets: ItemPreset[];
   invoices: Invoice[];
+  deletedInvoiceIds?: string[];
+  deletedCustomerIds?: string[];
 };
 
 const STORAGE_KEY = "madhav-invoice-maker-data-v1";
@@ -351,7 +353,9 @@ const seedData: AppData = {
     preset("preset-waterseal", "Waterseal", 160, false),
     preset("preset-terminal-plate", "Terminal Plate", 70, false)
   ],
-  invoices: []
+  invoices: [],
+  deletedInvoiceIds: [],
+  deletedCustomerIds: []
 };
 
 function preset(id: string, name: string, rate: number, favorite: boolean): ItemPreset {
@@ -448,9 +452,22 @@ function invoiceFilename(invoice: Invoice, extension: "pdf" | "xlsx" | "docx") {
 }
 
 function mergeCloudData(local: AppData, cloud: AppData): AppData {
+  const deletedInvoices = new Set([
+    ...(local.deletedInvoiceIds || []),
+    ...(cloud.deletedInvoiceIds || [])
+  ]);
+
+  const deletedCustomers = new Set([
+    ...(local.deletedCustomerIds || []),
+    ...(cloud.deletedCustomerIds || [])
+  ]);
+
   const invMap = new Map<string, Invoice>();
-  (cloud.invoices || []).forEach((inv) => invMap.set(inv.id, inv));
+  (cloud.invoices || []).forEach((inv) => {
+    if (!deletedInvoices.has(inv.id)) invMap.set(inv.id, inv);
+  });
   (local.invoices || []).forEach((inv) => {
+    if (deletedInvoices.has(inv.id)) return;
     const existing = invMap.get(inv.id);
     if (!existing) {
       invMap.set(inv.id, inv);
@@ -464,8 +481,11 @@ function mergeCloudData(local: AppData, cloud: AppData): AppData {
   });
 
   const custMap = new Map<string, Customer>();
-  (cloud.customers || []).forEach((c) => custMap.set(c.id, c));
+  (cloud.customers || []).forEach((c) => {
+    if (!deletedCustomers.has(c.id)) custMap.set(c.id, c);
+  });
   (local.customers || []).forEach((c) => {
+    if (deletedCustomers.has(c.id)) return;
     if (!custMap.has(c.id)) {
       custMap.set(c.id, c);
     }
@@ -482,9 +502,11 @@ function mergeCloudData(local: AppData, cloud: AppData): AppData {
   return {
     ...cloud,
     ...local,
+    deletedInvoiceIds: Array.from(deletedInvoices),
+    deletedCustomerIds: Array.from(deletedCustomers),
     businesses: cloud.businesses && cloud.businesses.length > 0 ? cloud.businesses : local.businesses,
-    customers: Array.from(custMap.values()),
-    presets: Array.from(presetMap.values()),
+    customers: deduplicateCustomers(Array.from(custMap.values())),
+    presets: deduplicatePresets(Array.from(presetMap.values())),
     invoices: Array.from(invMap.values())
   };
 }
@@ -1181,7 +1203,14 @@ export default function Home() {
   const deleteInvoice = (id: string) => {
     if (!confirm("Are you sure you want to delete this invoice draft?")) return;
     const remaining = data.invoices.filter((inv) => inv.id !== id);
-    const nextData = { ...data, invoices: remaining };
+    const updatedDeletedInvoices = Array.from(
+      new Set([...(data.deletedInvoiceIds || []), id])
+    );
+    const nextData: AppData = {
+      ...data,
+      invoices: remaining,
+      deletedInvoiceIds: updatedDeletedInvoices
+    };
     saveDataAndSync(nextData);
     if (activeInvoiceId === id) {
       const remainingBizInvoices = remaining.filter((inv) => inv.businessId === business.id);
@@ -2256,7 +2285,14 @@ function AdminPanel({
   const deleteCustomer = (id: string) => {
     if (!confirm("Are you sure you want to delete this customer?")) return;
     const nextCustomers = data.customers.filter((c) => c.id !== id);
-    saveDataAndSync({ ...data, customers: deduplicateCustomers(nextCustomers) });
+    const updatedDeletedCustomers = Array.from(
+      new Set([...(data.deletedCustomerIds || []), id])
+    );
+    saveDataAndSync({
+      ...data,
+      customers: deduplicateCustomers(nextCustomers),
+      deletedCustomerIds: updatedDeletedCustomers
+    });
   };
 
   const exportBackup = () => {
