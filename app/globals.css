@@ -1625,7 +1625,77 @@ button {
 }
 
 /* Mobile & Touch Responsive Enhancements */
+.brand-logo-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.biz-name-title {
+  font-weight: 900;
+  font-size: 17px;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.admin-customer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+}
+
 @media (max-width: 760px) {
+  .app-header-bar {
+    padding: 10px 14px;
+    align-items: center;
+  }
+
+  .header-brand {
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .header-title-group {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .biz-name-title {
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 170px;
+  }
+
+  .sync-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    margin-left: 0;
+  }
+
+  .exit-biz-btn {
+    padding: 6px 10px;
+    min-height: 36px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
   .customer-group-header {
     flex-direction: column;
     align-items: stretch;
@@ -1649,6 +1719,16 @@ button {
 
   .autocomplete-dropdown {
     max-height: 200px;
+  }
+
+  .admin-customer-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .admin-customer-row .icon-button.danger {
+    align-self: flex-end;
   }
 }
 

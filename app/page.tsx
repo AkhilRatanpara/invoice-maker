@@ -1115,13 +1115,15 @@ export default function Home() {
     <main className="app-shell-clean">
       <header className="app-header-bar">
         <div className="header-brand">
-          <Building2 size={20} />
-          <span>{business.name}</span>
-          <span className="sync-tag">
-            {isNeonConnected ? "🟢 Neon Cloud Synced" : "🟡 Saved Locally"}
-          </span>
+          <Building2 size={22} className="brand-logo-icon" />
+          <div className="header-title-group">
+            <span className="biz-name-title">{business.name}</span>
+            <span className="sync-tag">
+              {isNeonConnected ? "🟢 Neon Cloud Synced" : "🟡 Saved Locally"}
+            </span>
+          </div>
         </div>
-        <button className="ghost flex-btn" onClick={logout}>
+        <button className="ghost flex-btn exit-biz-btn" onClick={logout}>
           <LogOut size={18} />
           <span>Exit Business</span>
         </button>
@@ -1883,6 +1885,36 @@ function AdminPanel({
     }));
   };
 
+  const addCustomer = () => {
+    setData((current) => ({
+      ...current,
+      customers: [
+        {
+          id: uid(),
+          businessId: business.id,
+          name: "New Customer",
+          description: ""
+        },
+        ...current.customers
+      ]
+    }));
+  };
+
+  const updateCustomer = (id: string, patch: Partial<Customer>) => {
+    setData((current) => ({
+      ...current,
+      customers: current.customers.map((c) => (c.id === id ? { ...c, ...patch } : c))
+    }));
+  };
+
+  const deleteCustomer = (id: string) => {
+    if (!confirm("Are you sure you want to delete this customer?")) return;
+    setData((current) => ({
+      ...current,
+      customers: current.customers.filter((c) => c.id !== id)
+    }));
+  };
+
   const exportBackup = () => {
     downloadBlob(
       new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
@@ -2063,12 +2095,51 @@ function AdminPanel({
 
         {tab === "customers" && (
           <section className="editor-panel">
-            <h3>Saved Customers</h3>
-            <div className="admin-list">
+            <div className="panel-toolbar">
+              <h3>Saved Customers Database ({customers.length})</h3>
+              <button className="primary" onClick={addCustomer}>
+                <Plus size={18} />
+                Add Customer
+              </button>
+            </div>
+            <div className="admin-list" style={{ marginTop: "14px" }}>
               {customers.map((customer) => (
-                <div key={customer.id} className="customer-card">
-                  <strong>{customer.name}</strong>
-                  <span>{customer.description}</span>
+                <div key={customer.id} className="admin-customer-row">
+                  <div className="grid two flex-1">
+                    <label>
+                      <span className="field-label" style={{ marginTop: 0 }}>
+                        Customer Name
+                      </span>
+                      <input
+                        className="input"
+                        value={customer.name}
+                        onChange={(event) =>
+                          updateCustomer(customer.id, { name: event.target.value })
+                        }
+                        placeholder="Customer Name"
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label" style={{ marginTop: 0 }}>
+                        Description Sub-line
+                      </span>
+                      <input
+                        className="input"
+                        value={customer.description}
+                        onChange={(event) =>
+                          updateCustomer(customer.id, { description: event.target.value })
+                        }
+                        placeholder="Sub-line / Division / Location"
+                      />
+                    </label>
+                  </div>
+                  <button
+                    className="icon-button danger"
+                    onClick={() => deleteCustomer(customer.id)}
+                    title="Delete Customer"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                 </div>
               ))}
             </div>
