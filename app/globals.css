@@ -1925,16 +1925,18 @@ button {
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
-  background: #0e766e;
-  color: #ffffff;
-  padding: 12px 20px;
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 12px 20px 15px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   gap: 16px;
-  max-width: min(90vw, 560px);
+  max-width: min(90vw, 520px);
   animation: slideDownBanner 0.3s ease-out;
+  overflow: hidden;
 }
 
 @keyframes slideDownBanner {
@@ -1951,19 +1953,25 @@ button {
 .sync-banner-text {
   font-size: 14px;
   line-height: 1.4;
+  flex: 1;
+}
+
+.sync-banner-text strong {
+  color: #34d399;
+  font-weight: 800;
 }
 
 .sync-banner-item {
   font-size: 13px;
-  opacity: 0.95;
+  color: #e2e8f0;
   margin-top: 2px;
   font-weight: 600;
 }
 
 .sync-banner-close {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
   border: none;
-  color: #ffffff;
+  color: #94a3b8;
   font-size: 14px;
   font-weight: bold;
   border-radius: 50%;
@@ -1974,9 +1982,29 @@ button {
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  transition: all 0.15s ease;
 }
 .sync-banner-close:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.sync-banner-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #10b981, #34d399);
+  animation: timerBar 4s linear forwards;
+}
+
+@keyframes timerBar {
+  from {
+    width: 100%;
+  }
+  to {
+    width: 0%;
+  }
 }
 
 

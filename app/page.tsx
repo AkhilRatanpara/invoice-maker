@@ -953,7 +953,15 @@ export default function Home() {
   const [customerMode, setCustomerMode] = useState<"select" | "new">("select");
   const [storageInfo, setStorageInfo] = useState<{ prettySize: string; bytes: number } | null>(null);
   const [previewModalInvoiceId, setPreviewModalInvoiceId] = useState<string>("");
-  const [syncNotification, setSyncNotification] = useState<{ title: string; details: string[] } | null>(null);
+  const [syncNotification, setSyncNotification] = useState<{ id: number; title: string; details: string[] } | null>(null);
+
+  useEffect(() => {
+    if (!syncNotification) return;
+    const timer = setTimeout(() => {
+      setSyncNotification(null);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [syncNotification]);
 
   const [isNeonConnected, setIsNeonConnected] = useState(false);
 
@@ -1115,7 +1123,19 @@ export default function Home() {
       const existing = map.get(name) || [];
       map.set(name, [...existing, inv]);
     });
-    return Array.from(map.entries());
+
+    const entries = Array.from(map.entries());
+    entries.sort((a, b) => {
+      const latestTimeA = Math.max(
+        ...a[1].map((inv) => new Date(inv.lastEdited || inv.date || 0).getTime())
+      );
+      const latestTimeB = Math.max(
+        ...b[1].map((inv) => new Date(inv.lastEdited || inv.date || 0).getTime())
+      );
+      return latestTimeB - latestTimeA;
+    });
+
+    return entries;
   }, [invoicesForBusiness]);
 
   useEffect(() => {
@@ -1571,7 +1591,7 @@ export default function Home() {
   return (
     <main className="app-shell-clean">
       {syncNotification && (
-        <div className="top-sync-banner">
+        <div className="top-sync-banner" key={syncNotification.id}>
           <div className="sync-banner-text">
             <strong>{syncNotification.title}</strong>
             {syncNotification.details.map((d, i) => (
@@ -1581,6 +1601,7 @@ export default function Home() {
           <button className="sync-banner-close" onClick={() => setSyncNotification(null)}>
             ✕
           </button>
+          <div className="sync-banner-progress-bar" />
         </div>
       )}
       <header className="app-header-bar">
@@ -1917,7 +1938,8 @@ export default function Home() {
                           saveDataAndSync({ ...data, customers: nextCusts });
                           if (changes.length > 0) {
                             setSyncNotification({
-                              title: "🟢 Neon Database Synced",
+                              id: Date.now(),
+                              title: "✨ Database Updated",
                               details: changes
                             });
                           }
@@ -2163,7 +2185,8 @@ export default function Home() {
                         saveDataAndSync({ ...data, presets: updatedPresets });
                         if (changes.length > 0) {
                           setSyncNotification({
-                            title: "🟢 Neon Database Synced",
+                            id: Date.now(),
+                            title: "✨ Database Updated",
                             details: changes
                           });
                         }
