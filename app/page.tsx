@@ -770,25 +770,8 @@ async function exportWordDoc(business: Business, invoice: Invoice) {
 }
 
 function ZoomablePreview({ business, invoice }: { business: Business; invoice: Invoice }) {
-  const [viewMode, setViewMode] = useState<"pdf" | "html">("html");
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string>("");
-
-  useEffect(() => {
-    let url = "";
-    try {
-      const doc = buildPdfDoc(business, invoice);
-      const blob = doc.output("blob");
-      url = URL.createObjectURL(blob);
-      setPdfBlobUrl(url);
-    } catch (err) {
-      console.warn("Failed to generate PDF blob URL:", err);
-    }
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [business, invoice]);
 
   const autoFitScale = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -809,83 +792,51 @@ function ZoomablePreview({ business, invoice }: { business: Business; invoice: I
   return (
     <div className="preview-viewer-box" ref={containerRef}>
       <div className="zoom-toolbar">
-        <div className="segmented-sm">
+        <span className="zoom-title">📄 Invoice Preview</span>
+        <div className="zoom-btn-group">
           <button
-            className={viewMode === "pdf" ? "active" : ""}
-            onClick={() => setViewMode("pdf")}
-            title="Exact Download PDF View with Native Finger Pinch-to-Zoom"
+            className="secondary compact-btn"
+            onClick={() => setZoom((z) => Math.max(0.3, Number((z - 0.1).toFixed(2))))}
+            title="Zoom Out"
           >
-            📄 PDF View (Finger Zoom)
+            -
           </button>
+          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
           <button
-            className={viewMode === "html" ? "active" : ""}
-            onClick={() => setViewMode("html")}
-            title="Fast HTML Sheet View"
+            className="secondary compact-btn"
+            onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(2))))}
+            title="Zoom In"
           >
-            📑 HTML View
+            +
+          </button>
+          <button className="secondary compact-btn" onClick={autoFitScale}>
+            Auto Fit
           </button>
         </div>
-
-        {viewMode === "html" && (
-          <div className="zoom-btn-group">
-            <button
-              className="secondary compact-btn"
-              onClick={() => setZoom((z) => Math.max(0.3, Number((z - 0.1).toFixed(2))))}
-              title="Zoom Out"
-            >
-              -
-            </button>
-            <span className="zoom-label">{Math.round(zoom * 100)}%</span>
-            <button
-              className="secondary compact-btn"
-              onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(2))))}
-              title="Zoom In"
-            >
-              +
-            </button>
-            <button className="secondary compact-btn" onClick={autoFitScale}>
-              Auto Fit
-            </button>
-          </div>
-        )}
       </div>
 
-      {viewMode === "pdf" ? (
-        <div className="pdf-iframe-scroll-wrapper">
-          {pdfBlobUrl ? (
-            <iframe
-              src={pdfBlobUrl}
-              className="pdf-preview-iframe"
-              title="PDF Document Preview"
-            />
-          ) : (
-            <div className="center-screen">Rendering exact PDF preview...</div>
-          )}
-        </div>
-      ) : (
-        <div className="paper-scroll-wrapper">
+      <div className="paper-scroll-wrapper">
+        <div
+          className="paper-scale-container"
+          style={{
+            width: `${Math.round(794 * zoom)}px`,
+            minHeight: `${Math.round(1123 * zoom)}px`,
+            overflow: "hidden"
+          }}
+        >
           <div
-            className="paper-scale-container"
+            className="paper-scale-wrapper"
             style={{
-              width: `${Math.round(794 * zoom)}px`,
-              minHeight: `${Math.round(1123 * zoom)}px`,
-              overflow: "hidden"
+              width: "794px",
+              minHeight: "1123px",
+              transform: `scale(${zoom})`,
+              transformOrigin: "top left"
             }}
           >
-            <div
-              className="paper-scale-wrapper"
-              style={{
-                width: "794px",
-                minHeight: "1123px",
-                transform: `scale(${zoom})`,
-                transformOrigin: "top left"
-              }}
-            >
-              <InvoicePreview business={business} invoice={invoice} />
-            </div>
+            <InvoicePreview business={business} invoice={invoice} />
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -1728,7 +1679,18 @@ export default function Home() {
                       <button
                         key={id}
                         className={customerMode === id ? "active" : ""}
-                        onClick={() => setCustomerMode(id as typeof customerMode)}
+                        onClick={() => {
+                          const nextMode = id as typeof customerMode;
+                          setCustomerMode(nextMode);
+                          if (nextMode === "new") {
+                            updateInvoice((inv) => ({
+                              ...inv,
+                              customerId: undefined,
+                              customerName: "",
+                              customerDescription: ""
+                            }));
+                          }
+                        }}
                       >
                         {label}
                       </button>
@@ -1791,16 +1753,24 @@ export default function Home() {
                     <div className="grid two">
                       <label>
                         <span className="field-label">Customer / Firm Name</span>
-                        <input
-                          className="input"
+                        <CustomerAutocomplete
                           value={activeInvoice.customerName}
-                          onChange={(event) =>
+                          customers={customers}
+                          onChange={(val) =>
                             updateInvoice((invoice) => ({
                               ...invoice,
-                              customerName: event.target.value
+                              customerName: val
                             }))
                           }
-                          placeholder="Enter new customer or company name..."
+                          onSelectCustomer={(cust) =>
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerId: cust.id,
+                              customerName: cust.name,
+                              customerDescription: cust.description
+                            }))
+                          }
+                          placeholder="Type customer name (e.g. Akhil)..."
                         />
                       </label>
                       <label>
