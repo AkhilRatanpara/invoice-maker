@@ -9,6 +9,11 @@ function fuzzyMatch(text: string, query: string): boolean {
   return tokens.every((token) => target.includes(token));
 }
 
+type SyncResult<T> = {
+  data: T;
+  changes: string[];
+};
+
 function deduplicateCustomers(custs: Customer[]): Customer[] {
   const map = new Map<string, Customer>();
   (custs || []).forEach((c) => {
@@ -18,8 +23,10 @@ function deduplicateCustomers(custs: Customer[]): Customer[] {
       map.set(key, { ...c, name: c.name.trim() });
     } else {
       const existing = map.get(key)!;
-      if (!existing.description && c.description) {
-        map.set(key, { ...existing, description: c.description.trim() });
+      const existingTime = new Date(existing.lastEdited || 0).getTime();
+      const cTime = new Date(c.lastEdited || 0).getTime();
+      if (cTime > existingTime || (!existing.description && c.description)) {
+        map.set(key, { ...existing, ...c, name: c.name.trim() });
       }
     }
   });
@@ -33,6 +40,13 @@ function deduplicatePresets(presets: ItemPreset[]): ItemPreset[] {
     const key = `${p.businessId || seedBusinessId}_${p.name.trim().toLowerCase()}`;
     if (!map.has(key)) {
       map.set(key, { ...p, name: p.name.trim() });
+    } else {
+      const existing = map.get(key)!;
+      const existingTime = new Date(existing.lastEdited || 0).getTime();
+      const pTime = new Date(p.lastEdited || 0).getTime();
+      if (pTime > existingTime) {
+        map.set(key, { ...existing, ...p, name: p.name.trim() });
+      }
     }
   });
   return Array.from(map.values());
@@ -43,36 +57,50 @@ function autoSyncCustomer(
   name: string,
   description: string,
   businessId: string
-): Customer[] {
+): SyncResult<Customer[]> {
   const trimmedName = name.trim();
-  if (!trimmedName) return deduplicateCustomers(currentCustomers);
+  const changes: string[] = [];
+  if (!trimmedName) return { data: deduplicateCustomers(currentCustomers), changes };
+
   const existing = currentCustomers.find(
     (c) => c.businessId === businessId && c.name.trim().toLowerCase() === trimmedName.toLowerCase()
   );
+
+  const nowIso = new Date().toISOString();
+
   if (existing) {
     if ((existing.description || "").trim() !== description.trim()) {
+      changes.push(`Customer "${trimmedName}" description updated: "${existing.description || ""}" → "${description.trim()}"`);
       const updated = currentCustomers.map((c) =>
-        c.id === existing.id ? { ...c, description: description.trim() } : c
+        c.id === existing.id
+          ? { ...c, description: description.trim(), lastEdited: nowIso }
+          : c
       );
-      return deduplicateCustomers(updated);
+      return { data: deduplicateCustomers(updated), changes };
     }
-    return deduplicateCustomers(currentCustomers);
+    return { data: deduplicateCustomers(currentCustomers), changes };
   }
+
   const newCustomer: Customer = {
     id: uid(),
     businessId,
     name: trimmedName,
-    description: description.trim()
+    description: description.trim(),
+    lastEdited: nowIso
   };
-  return deduplicateCustomers([newCustomer, ...currentCustomers]);
+  changes.push(`New Customer saved to Database: "${trimmedName}"`);
+  return { data: deduplicateCustomers([newCustomer, ...currentCustomers]), changes };
 }
 
 function autoSyncInvoiceItems(
   currentPresets: ItemPreset[],
   invoice: Invoice,
   businessId: string
-): ItemPreset[] {
+): SyncResult<ItemPreset[]> {
   let updatedPresets = [...currentPresets];
+  const changes: string[] = [];
+  const nowIso = new Date().toISOString();
+
   invoice.groups.forEach((group) => {
     group.rows.forEach((row) => {
       const name = row.description.trim();
@@ -83,25 +111,29 @@ function autoSyncInvoiceItems(
       if (existingIndex >= 0) {
         const existing = updatedPresets[existingIndex];
         if (existing.rate !== row.rate || (row.unit && existing.unit !== row.unit)) {
+          changes.push(`Item "${name}" price updated: Rs. ${existing.rate} → Rs. ${row.rate}`);
           updatedPresets[existingIndex] = {
             ...existing,
             rate: row.rate,
-            unit: row.unit || existing.unit
+            unit: row.unit || existing.unit,
+            lastEdited: nowIso
           };
         }
       } else {
+        changes.push(`New Item saved to Database: "${name}" at Rs. ${row.rate}`);
         updatedPresets.unshift({
           id: uid(),
           businessId,
           name,
           unit: row.unit || "No",
           rate: row.rate,
-          favorite: false
+          favorite: false,
+          lastEdited: nowIso
         });
       }
     });
   });
-  return deduplicatePresets(updatedPresets);
+  return { data: deduplicatePresets(updatedPresets), changes };
 }
 
 function ItemAutocomplete({
@@ -297,6 +329,7 @@ type Customer = {
   name: string;
   description: string;
   phone?: string;
+  lastEdited?: string;
 };
 
 type ItemPreset = {
@@ -307,6 +340,7 @@ type ItemPreset = {
   rate: number;
   favorite: boolean;
   hidden?: boolean;
+  lastEdited?: string;
 };
 
 type InvoiceRow = {
@@ -524,16 +558,30 @@ function mergeCloudData(local: AppData, cloud: AppData): AppData {
   });
   (local.customers || []).forEach((c) => {
     if (deletedCustomers.has(c.id)) return;
-    if (!custMap.has(c.id)) {
+    const existing = custMap.get(c.id);
+    if (!existing) {
       custMap.set(c.id, c);
+    } else {
+      const localTime = new Date(c.lastEdited || 0).getTime();
+      const cloudTime = new Date(existing.lastEdited || 0).getTime();
+      if (localTime >= cloudTime) {
+        custMap.set(c.id, c);
+      }
     }
   });
 
   const presetMap = new Map<string, ItemPreset>();
   (cloud.presets || []).forEach((p) => presetMap.set(p.id, p));
   (local.presets || []).forEach((p) => {
-    if (!presetMap.has(p.id)) {
+    const existing = presetMap.get(p.id);
+    if (!existing) {
       presetMap.set(p.id, p);
+    } else {
+      const localTime = new Date(p.lastEdited || 0).getTime();
+      const cloudTime = new Date(existing.lastEdited || 0).getTime();
+      if (localTime >= cloudTime) {
+        presetMap.set(p.id, p);
+      }
     }
   });
 
@@ -905,6 +953,7 @@ export default function Home() {
   const [customerMode, setCustomerMode] = useState<"select" | "new">("select");
   const [storageInfo, setStorageInfo] = useState<{ prettySize: string; bytes: number } | null>(null);
   const [previewModalInvoiceId, setPreviewModalInvoiceId] = useState<string>("");
+  const [syncNotification, setSyncNotification] = useState<{ title: string; details: string[] } | null>(null);
 
   const [isNeonConnected, setIsNeonConnected] = useState(false);
 
@@ -1164,12 +1213,13 @@ export default function Home() {
 
     let updatedCustomers = data.customers;
     if (invoice.customerName.trim()) {
-      updatedCustomers = autoSyncCustomer(
+      const syncRes = autoSyncCustomer(
         data.customers,
         invoice.customerName,
         invoice.customerDescription,
         business.id
       );
+      updatedCustomers = syncRes.data;
     }
 
     const nextData = {
@@ -1185,33 +1235,72 @@ export default function Home() {
     pushState("editor", "items");
   };
 
-  const login = () => {
+  const login = async () => {
     if (pin === business.pin) {
       setMode("app");
       setViewMode("dashboard");
       setPin("");
       setPinError("");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+      try {
+        const res = await fetch("/api/db");
+        const result = await res.json();
+        if (result.connected && result.data && Array.isArray(result.data.businesses)) {
+          const freshData = sanitizeData(result.data);
+          setData(freshData);
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(freshData));
+          }
+          setIsNeonConnected(true);
+        }
+      } catch (err) {
+        console.warn("Neon login fetch error:", err);
+      }
       return;
     }
     setPinError("Wrong PIN. Please try again.");
   };
 
-  const adminLogin = () => {
+  const adminLogin = async () => {
     if (adminPin === data.adminPin) {
       setMode("admin");
       setAdminPin("");
       setPinError("");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+      try {
+        const res = await fetch("/api/db");
+        const result = await res.json();
+        if (result.connected && result.data && Array.isArray(result.data.businesses)) {
+          const freshData = sanitizeData(result.data);
+          setData(freshData);
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(freshData));
+          }
+          setIsNeonConnected(true);
+        }
+      } catch (err) {
+        console.warn("Neon admin login fetch error:", err);
+      }
       return;
     }
     setPinError("Wrong admin PIN.");
   };
 
   const logout = () => {
-    window.localStorage.removeItem(SESSION_KEY);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(SESSION_KEY);
+    }
     setMode("login");
     setPin("");
     setAdminPin("");
     setActiveInvoiceId("");
+    setIsCloudHydrated(false);
+    setData(seedData);
   };
 
   const createFreshInvoice = () => {
@@ -1481,6 +1570,19 @@ export default function Home() {
   // --- BUSINESS APPLICATION MODE ---
   return (
     <main className="app-shell-clean">
+      {syncNotification && (
+        <div className="top-sync-banner">
+          <div className="sync-banner-text">
+            <strong>{syncNotification.title}</strong>
+            {syncNotification.details.map((d, i) => (
+              <div key={i} className="sync-banner-item">{d}</div>
+            ))}
+          </div>
+          <button className="sync-banner-close" onClick={() => setSyncNotification(null)}>
+            ✕
+          </button>
+        </div>
+      )}
       <header className="app-header-bar">
         <div className="header-brand">
           <Building2 size={22} className="brand-logo-icon" />
@@ -1806,13 +1908,19 @@ export default function Home() {
                       className="primary next-button"
                       onClick={() => {
                         if (activeInvoice.customerName.trim()) {
-                          const nextCusts = autoSyncCustomer(
+                          const { data: nextCusts, changes } = autoSyncCustomer(
                             data.customers,
                             activeInvoice.customerName,
                             activeInvoice.customerDescription,
                             business.id
                           );
                           saveDataAndSync({ ...data, customers: nextCusts });
+                          if (changes.length > 0) {
+                            setSyncNotification({
+                              title: "🟢 Neon Database Synced",
+                              details: changes
+                            });
+                          }
                         }
                         setActiveStep("items");
                         pushState("editor", "items");
@@ -2047,12 +2155,18 @@ export default function Home() {
                     <button
                       className="primary"
                       onClick={() => {
-                        const updatedPresets = autoSyncInvoiceItems(
+                        const { data: updatedPresets, changes } = autoSyncInvoiceItems(
                           data.presets,
                           activeInvoice,
                           business.id
                         );
                         saveDataAndSync({ ...data, presets: updatedPresets });
+                        if (changes.length > 0) {
+                          setSyncNotification({
+                            title: "🟢 Neon Database Synced",
+                            details: changes
+                          });
+                        }
                         setActiveStep("preview");
                         pushState("editor", "preview");
                       }}
