@@ -57,10 +57,28 @@ export async function GET() {
       }
     }
 
+    let storageInfo = { prettySize: "0 B", bytes: 0 };
+    try {
+      const sizeResult = await queryNeon(
+        dbUrl,
+        `SELECT pg_size_pretty(pg_total_relation_size('invoice_app_data')) as pretty_size, pg_total_relation_size('invoice_app_data') as bytes;`
+      );
+      if (sizeResult && Array.isArray(sizeResult.rows) && sizeResult.rows.length > 0) {
+        const row = sizeResult.rows[0];
+        storageInfo = {
+          prettySize: String(row.pretty_size ?? row[0] ?? "0 B"),
+          bytes: Number(row.bytes ?? row[1] ?? 0)
+        };
+      }
+    } catch {
+      // Ignore size query fallback
+    }
+
     return NextResponse.json({
       connected: true,
       mode: "neon",
       data: storedData,
+      storageInfo,
       message: "Successfully connected to Neon Postgres database!"
     });
   } catch (error) {
