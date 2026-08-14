@@ -732,8 +732,25 @@ async function exportWordDoc(business: Business, invoice: Invoice) {
 }
 
 function ZoomablePreview({ business, invoice }: { business: Business; invoice: Invoice }) {
+  const [viewMode, setViewMode] = useState<"pdf" | "html">("pdf");
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string>("");
+
+  useEffect(() => {
+    let url = "";
+    try {
+      const doc = buildPdfDoc(business, invoice);
+      const blob = doc.output("blob");
+      url = URL.createObjectURL(blob);
+      setPdfBlobUrl(url);
+    } catch (err) {
+      console.warn("Failed to generate PDF blob URL:", err);
+    }
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [business, invoice]);
 
   const autoFitScale = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -754,51 +771,83 @@ function ZoomablePreview({ business, invoice }: { business: Business; invoice: I
   return (
     <div className="preview-viewer-box" ref={containerRef}>
       <div className="zoom-toolbar">
-        <span className="zoom-title">📄 PDF Preview</span>
-        <div className="zoom-btn-group">
+        <div className="segmented-sm">
           <button
-            className="secondary compact-btn"
-            onClick={() => setZoom((z) => Math.max(0.3, Number((z - 0.1).toFixed(2))))}
-            title="Zoom Out"
+            className={viewMode === "pdf" ? "active" : ""}
+            onClick={() => setViewMode("pdf")}
+            title="Exact Download PDF View with Native Finger Pinch-to-Zoom"
           >
-            -
+            📄 PDF View (Finger Zoom)
           </button>
-          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
           <button
-            className="secondary compact-btn"
-            onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(2))))}
-            title="Zoom In"
+            className={viewMode === "html" ? "active" : ""}
+            onClick={() => setViewMode("html")}
+            title="Fast HTML Sheet View"
           >
-            +
-          </button>
-          <button className="secondary compact-btn" onClick={autoFitScale}>
-            Auto Fit
+            📑 HTML View
           </button>
         </div>
+
+        {viewMode === "html" && (
+          <div className="zoom-btn-group">
+            <button
+              className="secondary compact-btn"
+              onClick={() => setZoom((z) => Math.max(0.3, Number((z - 0.1).toFixed(2))))}
+              title="Zoom Out"
+            >
+              -
+            </button>
+            <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+            <button
+              className="secondary compact-btn"
+              onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(2))))}
+              title="Zoom In"
+            >
+              +
+            </button>
+            <button className="secondary compact-btn" onClick={autoFitScale}>
+              Auto Fit
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="paper-scroll-wrapper">
-        <div
-          className="paper-scale-container"
-          style={{
-            width: `${Math.round(794 * zoom)}px`,
-            minHeight: `${Math.round(1123 * zoom)}px`,
-            overflow: "hidden"
-          }}
-        >
+      {viewMode === "pdf" ? (
+        <div className="pdf-iframe-scroll-wrapper">
+          {pdfBlobUrl ? (
+            <iframe
+              src={pdfBlobUrl}
+              className="pdf-preview-iframe"
+              title="PDF Document Preview"
+            />
+          ) : (
+            <div className="center-screen">Rendering exact PDF preview...</div>
+          )}
+        </div>
+      ) : (
+        <div className="paper-scroll-wrapper">
           <div
-            className="paper-scale-wrapper"
+            className="paper-scale-container"
             style={{
-              width: "794px",
-              minHeight: "1123px",
-              transform: `scale(${zoom})`,
-              transformOrigin: "top left"
+              width: `${Math.round(794 * zoom)}px`,
+              minHeight: `${Math.round(1123 * zoom)}px`,
+              overflow: "hidden"
             }}
           >
-            <InvoicePreview business={business} invoice={invoice} />
+            <div
+              className="paper-scale-wrapper"
+              style={{
+                width: "794px",
+                minHeight: "1123px",
+                transform: `scale(${zoom})`,
+                transformOrigin: "top left"
+              }}
+            >
+              <InvoicePreview business={business} invoice={invoice} />
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1022,7 +1071,9 @@ export default function Home() {
   const invoicesByCustomer = useMemo(() => {
     const map = new Map<string, Invoice[]>();
     invoicesForBusiness.forEach((inv) => {
-      const name = inv.customerName.trim() || "Unassigned / Drafts";
+      const isBlank = !inv.customerName.trim() && invoiceTotal(inv) === 0;
+      if (isBlank) return;
+      const name = inv.customerName.trim() || "Unassigned";
       const existing = map.get(name) || [];
       map.set(name, [...existing, inv]);
     });
@@ -1105,21 +1156,12 @@ export default function Home() {
   const updateInvoice = (updater: (invoice: Invoice) => Invoice) => {
     if (!activeInvoice) return;
     const updatedInv = updater(activeInvoice);
-    let updatedCustomers = data.customers;
-    if (updatedInv.customerName.trim()) {
-      updatedCustomers = autoSyncCustomer(
-        data.customers,
-        updatedInv.customerName,
-        updatedInv.customerDescription,
-        business.id
-      );
-    }
     const nextInvoices = data.invoices.map((invoice) =>
       invoice.id === activeInvoice.id
         ? { ...updatedInv, lastEdited: new Date().toISOString() }
         : invoice
     );
-    saveDataAndSync({ ...data, customers: updatedCustomers, invoices: nextInvoices });
+    saveDataAndSync({ ...data, invoices: nextInvoices });
   };
 
   const createInvoiceForCustomer = (custName: string) => {
