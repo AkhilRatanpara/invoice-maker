@@ -414,9 +414,52 @@ function invoiceFilename(invoice: Invoice, extension: "pdf" | "xlsx" | "docx") {
   return `${customerFirstName(invoice)}_Invoice_${formattedDateForFile(invoice.date)}.${extension}`;
 }
 
+function mergeCloudData(local: AppData, cloud: AppData): AppData {
+  const invMap = new Map<string, Invoice>();
+  (cloud.invoices || []).forEach((inv) => invMap.set(inv.id, inv));
+  (local.invoices || []).forEach((inv) => {
+    const existing = invMap.get(inv.id);
+    if (!existing) {
+      invMap.set(inv.id, inv);
+    } else {
+      const localTime = new Date(inv.lastEdited || 0).getTime();
+      const cloudTime = new Date(existing.lastEdited || 0).getTime();
+      if (localTime >= cloudTime) {
+        invMap.set(inv.id, inv);
+      }
+    }
+  });
+
+  const custMap = new Map<string, Customer>();
+  (cloud.customers || []).forEach((c) => custMap.set(c.id, c));
+  (local.customers || []).forEach((c) => {
+    if (!custMap.has(c.id)) {
+      custMap.set(c.id, c);
+    }
+  });
+
+  const presetMap = new Map<string, ItemPreset>();
+  (cloud.presets || []).forEach((p) => presetMap.set(p.id, p));
+  (local.presets || []).forEach((p) => {
+    if (!presetMap.has(p.id)) {
+      presetMap.set(p.id, p);
+    }
+  });
+
+  return {
+    ...cloud,
+    ...local,
+    businesses: cloud.businesses && cloud.businesses.length > 0 ? cloud.businesses : local.businesses,
+    customers: Array.from(custMap.values()),
+    presets: Array.from(presetMap.values()),
+    invoices: Array.from(invMap.values())
+  };
+}
+
 export default function Home() {
   const [data, setData] = useState<AppData>(seedData);
   const [ready, setReady] = useState(false);
+  const [isCloudHydrated, setIsCloudHydrated] = useState(false);
   const [mode, setMode] = useState<"login" | "app" | "admin">("login");
   const [viewMode, setViewMode] = useState<"dashboard" | "editor">("dashboard");
   const [selectedBusinessId, setSelectedBusinessId] = useState(seedBusinessId);
@@ -472,7 +515,7 @@ export default function Home() {
       setReady(true);
     }
 
-    // Auto-restore latest cloud database state from Neon on load!
+    // Auto-restore & merge latest cloud database state from Neon on load!
     fetch("/api/db")
       .then((res) => res.json())
       .then((result) => {
@@ -485,16 +528,55 @@ export default function Home() {
             result.data.businesses.length > 0
           ) {
             const cloudData = sanitizeData(result.data);
-            setData(cloudData);
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudData));
+            setData((currentLocal) => {
+              const merged = mergeCloudData(currentLocal, cloudData);
+              window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+              return merged;
+            });
           }
         }
       })
-      .catch((e) => console.warn("Neon background restore check skipped:", e));
+      .catch((e) => console.warn("Neon background restore check skipped:", e))
+      .finally(() => {
+        setIsCloudHydrated(true);
+      });
   }, []);
 
+  // Periodic Live Background Sync Polling (Multi-Device Live Sync every 3.5s)
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !isCloudHydrated) return;
+    const interval = setInterval(() => {
+      fetch("/api/db")
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.connected) {
+            setIsNeonConnected(true);
+            if (result.storageInfo) setStorageInfo(result.storageInfo);
+            if (
+              result.data &&
+              Array.isArray(result.data.businesses) &&
+              result.data.businesses.length > 0
+            ) {
+              const cloudData = sanitizeData(result.data);
+              setData((currentLocal) => {
+                const merged = mergeCloudData(currentLocal, cloudData);
+                if (JSON.stringify(merged) !== JSON.stringify(currentLocal)) {
+                  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+                  return merged;
+                }
+                return currentLocal;
+              });
+            }
+          }
+        })
+        .catch(() => {});
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [ready, isCloudHydrated]);
+
+  // Debounced auto-sync POST to Neon DB (runs ONLY when ready & hydrated)
+  useEffect(() => {
+    if (!ready || !isCloudHydrated) return;
     const timer = window.setTimeout(() => {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setLastSavedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
@@ -512,7 +594,7 @@ export default function Home() {
         .catch(() => {});
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [data, ready]);
+  }, [data, ready, isCloudHydrated]);
 
   useEffect(() => {
     if (!ready || mode !== "app") return;
