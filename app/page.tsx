@@ -1,12 +1,41 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function fuzzyMatch(text: string, query: string): boolean {
   if (!query || !query.trim()) return true;
   const target = text.toLowerCase();
   const tokens = query.toLowerCase().trim().split(/\s+/);
   return tokens.every((token) => target.includes(token));
+}
+
+function deduplicateCustomers(custs: Customer[]): Customer[] {
+  const map = new Map<string, Customer>();
+  (custs || []).forEach((c) => {
+    if (!c || !c.name || !c.name.trim()) return;
+    const key = `${c.businessId || seedBusinessId}_${c.name.trim().toLowerCase()}`;
+    if (!map.has(key)) {
+      map.set(key, { ...c, name: c.name.trim() });
+    } else {
+      const existing = map.get(key)!;
+      if (!existing.description && c.description) {
+        map.set(key, { ...existing, description: c.description.trim() });
+      }
+    }
+  });
+  return Array.from(map.values());
+}
+
+function deduplicatePresets(presets: ItemPreset[]): ItemPreset[] {
+  const map = new Map<string, ItemPreset>();
+  (presets || []).forEach((p) => {
+    if (!p || !p.name || !p.name.trim()) return;
+    const key = `${p.businessId || seedBusinessId}_${p.name.trim().toLowerCase()}`;
+    if (!map.has(key)) {
+      map.set(key, { ...p, name: p.name.trim() });
+    }
+  });
+  return Array.from(map.values());
 }
 
 function autoSyncCustomer(
@@ -16,17 +45,18 @@ function autoSyncCustomer(
   businessId: string
 ): Customer[] {
   const trimmedName = name.trim();
-  if (!trimmedName) return currentCustomers;
+  if (!trimmedName) return deduplicateCustomers(currentCustomers);
   const existing = currentCustomers.find(
-    (c) => c.businessId === businessId && c.name.toLowerCase() === trimmedName.toLowerCase()
+    (c) => c.businessId === businessId && c.name.trim().toLowerCase() === trimmedName.toLowerCase()
   );
   if (existing) {
-    if ((existing.description || "") !== description.trim()) {
-      return currentCustomers.map((c) =>
+    if ((existing.description || "").trim() !== description.trim()) {
+      const updated = currentCustomers.map((c) =>
         c.id === existing.id ? { ...c, description: description.trim() } : c
       );
+      return deduplicateCustomers(updated);
     }
-    return currentCustomers;
+    return deduplicateCustomers(currentCustomers);
   }
   const newCustomer: Customer = {
     id: uid(),
@@ -34,7 +64,7 @@ function autoSyncCustomer(
     name: trimmedName,
     description: description.trim()
   };
-  return [newCustomer, ...currentCustomers];
+  return deduplicateCustomers([newCustomer, ...currentCustomers]);
 }
 
 function ItemAutocomplete({
@@ -681,17 +711,26 @@ async function exportWordDoc(business: Business, invoice: Invoice) {
 
 function ZoomablePreview({ business, invoice }: { business: Business; invoice: Invoice }) {
   const [zoom, setZoom] = useState(1);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.innerWidth < 760) {
-      const mobileWidth = window.innerWidth - 32;
-      const calcZoom = Math.max(0.42, Math.min(1, mobileWidth / 794));
-      setZoom(Number(calcZoom.toFixed(2)));
+  const autoFitScale = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const containerWidth = containerRef.current
+        ? containerRef.current.clientWidth - 28
+        : window.innerWidth - 32;
+      const fitZoom = Math.min(1, Math.max(0.35, containerWidth / 794));
+      setZoom(Number(fitZoom.toFixed(2)));
     }
   }, []);
 
+  useEffect(() => {
+    autoFitScale();
+    window.addEventListener("resize", autoFitScale);
+    return () => window.removeEventListener("resize", autoFitScale);
+  }, [autoFitScale]);
+
   return (
-    <div className="preview-viewer-box">
+    <div className="preview-viewer-box" ref={containerRef}>
       <div className="zoom-toolbar">
         <span className="zoom-title">📄 PDF Preview</span>
         <div className="zoom-btn-group">
@@ -705,22 +744,12 @@ function ZoomablePreview({ business, invoice }: { business: Business; invoice: I
           <span className="zoom-label">{Math.round(zoom * 100)}%</span>
           <button
             className="secondary compact-btn"
-            onClick={() => setZoom((z) => Math.min(1.8, Number((z + 0.1).toFixed(2))))}
+            onClick={() => setZoom((z) => Math.min(1.6, Number((z + 0.1).toFixed(2))))}
             title="Zoom In"
           >
             +
           </button>
-          <button
-            className="secondary compact-btn"
-            onClick={() => {
-              if (typeof window !== "undefined" && window.innerWidth < 760) {
-                const mobileWidth = window.innerWidth - 32;
-                setZoom(Number(Math.max(0.42, Math.min(1, mobileWidth / 794)).toFixed(2)));
-              } else {
-                setZoom(1);
-              }
-            }}
-          >
+          <button className="secondary compact-btn" onClick={autoFitScale}>
             Auto Fit
           </button>
         </div>
@@ -728,13 +757,24 @@ function ZoomablePreview({ business, invoice }: { business: Business; invoice: I
 
       <div className="paper-scroll-wrapper">
         <div
-          className="paper-scale-wrapper"
+          className="paper-scale-container"
           style={{
-            transform: `scale(${zoom})`,
-            transformOrigin: "top center"
+            width: `${Math.round(794 * zoom)}px`,
+            minHeight: `${Math.round(1123 * zoom)}px`,
+            overflow: "hidden"
           }}
         >
-          <InvoicePreview business={business} invoice={invoice} />
+          <div
+            className="paper-scale-wrapper"
+            style={{
+              width: "794px",
+              minHeight: "1123px",
+              transform: `scale(${zoom})`,
+              transformOrigin: "top left"
+            }}
+          >
+            <InvoicePreview business={business} invoice={invoice} />
+          </div>
         </div>
       </div>
     </div>
@@ -802,7 +842,7 @@ export default function Home() {
   const [activeInvoiceId, setActiveInvoiceId] = useState<string>("");
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [activeStep, setActiveStep] = useState<"customer" | "items" | "preview">("customer");
-  const [customerMode, setCustomerMode] = useState<"select" | "direct" | "new">("select");
+  const [customerMode, setCustomerMode] = useState<"select" | "new">("select");
   const [storageInfo, setStorageInfo] = useState<{ prettySize: string; bytes: number } | null>(null);
   const [previewModalInvoiceId, setPreviewModalInvoiceId] = useState<string>("");
 
@@ -822,8 +862,10 @@ export default function Home() {
         pin: b.pin || "1234"
       })),
       invoices: Array.isArray(raw.invoices) ? raw.invoices : [],
-      customers: Array.isArray(raw.customers) ? raw.customers : seedData.customers,
-      presets: Array.isArray(raw.presets) ? raw.presets : seedData.presets
+      customers: deduplicateCustomers(
+        Array.isArray(raw.customers) ? raw.customers : seedData.customers
+      ),
+      presets: deduplicatePresets(Array.isArray(raw.presets) ? raw.presets : seedData.presets)
     };
   };
 
@@ -1366,6 +1408,7 @@ export default function Home() {
       <AdminPanel
         data={data}
         setData={setData}
+        saveDataAndSync={saveDataAndSync}
         selectedBusinessId={selectedBusinessId}
         setSelectedBusinessId={setSelectedBusinessId}
         logout={logout}
@@ -1570,9 +1613,8 @@ export default function Home() {
                   <h3>Customer Details</h3>
                   <div className="segmented">
                     {[
-                      ["select", "Select Saved"],
-                      ["direct", "Direct Fill (Quick)"],
-                      ["new", "New Customer"]
+                      ["select", "👤 Select Saved Customer"],
+                      ["new", "➕ Create New Customer"]
                     ].map(([id, label]) => (
                       <button
                         key={id}
@@ -1586,50 +1628,8 @@ export default function Home() {
 
                   {customerMode === "select" && (
                     <div className="grid two">
-                      <label>
-                        <span className="field-label">Saved Customer</span>
-                        <select
-                          className="input"
-                          value={activeInvoice.customerId ?? ""}
-                          onChange={(event) => {
-                            const customer = customers.find(
-                              (item) => item.id === event.target.value
-                            );
-                            if (!customer) return;
-                            updateInvoice((invoice) => ({
-                              ...invoice,
-                              customerId: customer.id,
-                              customerName: customer.name,
-                              customerDescription: customer.description
-                            }));
-                          }}
-                        >
-                          <option value="">Choose customer</option>
-                          {customers.map((customer) => (
-                            <option key={customer.id} value={customer.id}>
-                              {customer.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span className="field-label">Invoice Date</span>
-                        <input
-                          className="input"
-                          type="date"
-                          value={activeInvoice.date}
-                          onChange={(event) =>
-                            updateInvoice((invoice) => ({ ...invoice, date: event.target.value }))
-                          }
-                        />
-                      </label>
-                    </div>
-                  )}
-
-                  {(customerMode === "direct" || customerMode === "new") && (
-                    <div className="grid two">
-                      <label>
-                        <span className="field-label">Customer Name (Search / Auto-suggest)</span>
+                      <label className="span-two">
+                        <span className="field-label">Search & Select Saved Customer</span>
                         <CustomerAutocomplete
                           value={activeInvoice.customerName}
                           customers={customers}
@@ -1647,6 +1647,51 @@ export default function Home() {
                               customerDescription: cust.description
                             }))
                           }
+                          placeholder="Search saved customer name..."
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">Invoice Date</span>
+                        <input
+                          className="input"
+                          type="date"
+                          value={activeInvoice.date}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({ ...invoice, date: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">Customer Sub-line / Description</span>
+                        <input
+                          className="input"
+                          value={activeInvoice.customerDescription}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerDescription: event.target.value
+                            }))
+                          }
+                          placeholder="(e.g. Fine Wire Division, Bileshwarpura)"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {customerMode === "new" && (
+                    <div className="grid two">
+                      <label>
+                        <span className="field-label">Customer / Firm Name</span>
+                        <input
+                          className="input"
+                          value={activeInvoice.customerName}
+                          onChange={(event) =>
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerName: event.target.value
+                            }))
+                          }
+                          placeholder="Enter new customer or company name..."
                         />
                       </label>
                       <label>
@@ -1661,7 +1706,7 @@ export default function Home() {
                         />
                       </label>
                       <label className="span-two">
-                        <span className="field-label">Customer Description Sub-line</span>
+                        <span className="field-label">Sub-line / Division / Location (Optional)</span>
                         <input
                           className="input"
                           value={activeInvoice.customerDescription}
@@ -1671,17 +1716,10 @@ export default function Home() {
                               customerDescription: event.target.value
                             }))
                           }
-                          placeholder="(Fine Wire Division, Bileshwarpura)"
+                          placeholder="(e.g. Fine Wire Division, Bileshwarpura)"
                         />
                       </label>
                     </div>
-                  )}
-
-                  {customerMode === "new" && (
-                    <button className="secondary" onClick={saveCustomerFromInvoice}>
-                      <UserPlus size={18} />
-                      Save Customer to Database
-                    </button>
                   )}
 
                   <div className="step-footer">
@@ -2081,6 +2119,7 @@ function InvoicePreview({ business, invoice }: { business: Business; invoice: In
 function AdminPanel({
   data,
   setData,
+  saveDataAndSync,
   selectedBusinessId,
   setSelectedBusinessId,
   logout,
@@ -2089,6 +2128,7 @@ function AdminPanel({
 }: {
   data: AppData;
   setData: React.Dispatch<React.SetStateAction<AppData>>;
+  saveDataAndSync: (nextData: AppData) => void;
   selectedBusinessId: string;
   setSelectedBusinessId: (id: string) => void;
   logout: () => void;
@@ -2143,20 +2183,21 @@ function AdminPanel({
   };
 
   const updateBusiness = (patch: Partial<Business>) => {
-    setData((current) => ({
-      ...current,
-      businesses: current.businesses.map((item) =>
+    const nextData = {
+      ...data,
+      businesses: data.businesses.map((item) =>
         item.id === business.id ? { ...item, ...patch } : item
       )
-    }));
+    };
+    saveDataAndSync(nextData);
   };
 
   const addBusiness = () => {
     const id = uid();
-    setData((current) => ({
-      ...current,
+    const nextData = {
+      ...data,
       businesses: [
-        ...current.businesses,
+        ...data.businesses,
         {
           id,
           name: "NEW BUSINESS",
@@ -2164,72 +2205,58 @@ function AdminPanel({
           subtitle: "",
           phone: "",
           pin: "0000",
-          template: "classic"
+          template: "classic" as const
         }
       ]
-    }));
+    };
+    saveDataAndSync(nextData);
     setSelectedBusinessId(id);
   };
 
   const addPreset = () => {
-    setData((current) => ({
-      ...current,
-      presets: [
-        {
-          id: uid(),
-          businessId: business.id,
-          name: "New item",
-          unit: "No",
-          rate: 0,
-          favorite: false
-        },
-        ...current.presets
-      ]
-    }));
+    const newPreset: ItemPreset = {
+      id: uid(),
+      businessId: business.id,
+      name: "New item",
+      unit: "No",
+      rate: 0,
+      favorite: false
+    };
+    saveDataAndSync({ ...data, presets: deduplicatePresets([newPreset, ...data.presets]) });
   };
 
   const updatePreset = (id: string, patch: Partial<ItemPreset>) => {
-    setData((current) => ({
-      ...current,
-      presets: current.presets.map((item) => (item.id === id ? { ...item, ...patch } : item))
-    }));
+    const nextPresets = data.presets.map((item) => (item.id === id ? { ...item, ...patch } : item));
+    saveDataAndSync({ ...data, presets: deduplicatePresets(nextPresets) });
   };
 
   const deletePreset = (id: string) => {
-    setData((current) => ({
-      ...current,
-      presets: current.presets.filter((item) => item.id !== id)
-    }));
+    const nextPresets = data.presets.filter((item) => item.id !== id);
+    saveDataAndSync({ ...data, presets: nextPresets });
   };
 
   const addCustomer = () => {
-    setData((current) => ({
-      ...current,
-      customers: [
-        {
-          id: uid(),
-          businessId: business.id,
-          name: "New Customer",
-          description: ""
-        },
-        ...current.customers
-      ]
-    }));
+    const newCust: Customer = {
+      id: uid(),
+      businessId: business.id,
+      name: "New Customer",
+      description: ""
+    };
+    saveDataAndSync({
+      ...data,
+      customers: deduplicateCustomers([newCust, ...data.customers])
+    });
   };
 
   const updateCustomer = (id: string, patch: Partial<Customer>) => {
-    setData((current) => ({
-      ...current,
-      customers: current.customers.map((c) => (c.id === id ? { ...c, ...patch } : c))
-    }));
+    const nextCustomers = data.customers.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    saveDataAndSync({ ...data, customers: deduplicateCustomers(nextCustomers) });
   };
 
   const deleteCustomer = (id: string) => {
     if (!confirm("Are you sure you want to delete this customer?")) return;
-    setData((current) => ({
-      ...current,
-      customers: current.customers.filter((c) => c.id !== id)
-    }));
+    const nextCustomers = data.customers.filter((c) => c.id !== id);
+    saveDataAndSync({ ...data, customers: deduplicateCustomers(nextCustomers) });
   };
 
   const exportBackup = () => {

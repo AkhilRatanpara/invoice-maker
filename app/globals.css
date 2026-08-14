@@ -1789,13 +1789,24 @@ button {
   max-height: 75vh;
   display: flex;
   justify-content: center;
-  padding: 12px 6px;
+  padding: 14px 8px;
+  background: #d8d4cd;
+  border-radius: 10px;
+}
+
+.paper-scale-container {
+  margin: 0 auto;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .paper-scale-wrapper {
+  width: 794px;
+  min-height: 1123px;
+  background: #ffffff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+  box-sizing: border-box;
   transition: transform 0.2s ease;
-  height: max-content;
-  margin: 0 auto;
 }
 
 .preview-modal-backdrop {
