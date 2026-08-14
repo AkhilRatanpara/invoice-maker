@@ -67,6 +67,43 @@ function autoSyncCustomer(
   return deduplicateCustomers([newCustomer, ...currentCustomers]);
 }
 
+function autoSyncInvoiceItems(
+  currentPresets: ItemPreset[],
+  invoice: Invoice,
+  businessId: string
+): ItemPreset[] {
+  let updatedPresets = [...currentPresets];
+  invoice.groups.forEach((group) => {
+    group.rows.forEach((row) => {
+      const name = row.description.trim();
+      if (!name || row.rate <= 0) return;
+      const existingIndex = updatedPresets.findIndex(
+        (p) => p.businessId === businessId && p.name.trim().toLowerCase() === name.toLowerCase()
+      );
+      if (existingIndex >= 0) {
+        const existing = updatedPresets[existingIndex];
+        if (existing.rate !== row.rate || (row.unit && existing.unit !== row.unit)) {
+          updatedPresets[existingIndex] = {
+            ...existing,
+            rate: row.rate,
+            unit: row.unit || existing.unit
+          };
+        }
+      } else {
+        updatedPresets.unshift({
+          id: uid(),
+          businessId,
+          name,
+          unit: row.unit || "No",
+          rate: row.rate,
+          favorite: false
+        });
+      }
+    });
+  });
+  return deduplicatePresets(updatedPresets);
+}
+
 function ItemAutocomplete({
   value,
   onChange,
@@ -208,6 +245,7 @@ import {
   Building2,
   Check,
   ChevronLeft,
+  CloudUpload,
   Database,
   Download,
   Eye,
@@ -732,7 +770,7 @@ async function exportWordDoc(business: Business, invoice: Invoice) {
 }
 
 function ZoomablePreview({ business, invoice }: { business: Business; invoice: Invoice }) {
-  const [viewMode, setViewMode] = useState<"pdf" | "html">("pdf");
+  const [viewMode, setViewMode] = useState<"pdf" | "html">("html");
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string>("");
@@ -1804,15 +1842,13 @@ export default function Home() {
                             activeInvoice.customerDescription,
                             business.id
                           );
-                          if (nextCusts !== data.customers) {
-                            saveDataAndSync({ ...data, customers: nextCusts });
-                          }
+                          saveDataAndSync({ ...data, customers: nextCusts });
                         }
                         setActiveStep("items");
                         pushState("editor", "items");
                       }}
                     >
-                      Continue to Work Items →
+                      💾 Save Customer & Continue to Work Items →
                     </button>
                   </div>
                 </section>
@@ -2041,11 +2077,17 @@ export default function Home() {
                     <button
                       className="primary"
                       onClick={() => {
+                        const updatedPresets = autoSyncInvoiceItems(
+                          data.presets,
+                          activeInvoice,
+                          business.id
+                        );
+                        saveDataAndSync({ ...data, presets: updatedPresets });
                         setActiveStep("preview");
                         pushState("editor", "preview");
                       }}
                     >
-                      Continue to Preview →
+                      💾 Save Items & Continue to Preview →
                     </button>
                   </div>
                 </section>
@@ -2395,6 +2437,10 @@ function AdminPanel({
             <h2>Admin Portal</h2>
           </div>
           <div className="topbar-actions">
+            <button className="primary" onClick={() => syncToNeon()} disabled={isSyncing}>
+              <CloudUpload size={18} />
+              {isSyncing ? "Syncing..." : "💾 Save Changes to Neon Cloud DB"}
+            </button>
             <button className="secondary" onClick={exportBackup}>
               <Download size={18} />
               Backup JSON Data
