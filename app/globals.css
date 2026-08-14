@@ -1732,5 +1732,136 @@ button {
   }
 }
 
+/* Zoomable PDF Viewer & Preview Modal */
+.preview-viewer-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #e2ded7;
+  border-radius: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.zoom-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.zoom-title {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.zoom-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compact-btn {
+  min-height: 30px !important;
+  padding: 2px 10px !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+}
+
+.zoom-label {
+  font-size: 13px;
+  font-weight: 800;
+  min-width: 44px;
+  text-align: center;
+  color: var(--ink);
+}
+
+.paper-scroll-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 75vh;
+  display: flex;
+  justify-content: center;
+  padding: 12px 6px;
+}
+
+.paper-scale-wrapper {
+  transition: transform 0.2s ease;
+  height: max-content;
+  margin: 0 auto;
+}
+
+.preview-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.preview-modal-card {
+  width: min(860px, 100%);
+  max-height: 92vh;
+  background: #ffffff;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.preview-modal-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #faf9f6;
+}
+
+.preview-modal-header h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.preview-modal-body {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.preview-modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #faf9f6;
+}
+
+@media (max-width: 600px) {
+  .preview-modal-card {
+    max-height: 96vh;
+    border-radius: 10px;
+  }
+
+  .preview-modal-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
 
 

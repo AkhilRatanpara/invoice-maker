@@ -180,6 +180,7 @@ import {
   ChevronLeft,
   Database,
   Download,
+  Eye,
   FileSpreadsheet,
   FileText,
   Lock,
@@ -189,9 +190,11 @@ import {
   Printer,
   Search,
   Settings,
+  Share2,
   Shield,
   Trash2,
-  UserPlus
+  UserPlus,
+  X
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -456,6 +459,336 @@ function mergeCloudData(local: AppData, cloud: AppData): AppData {
   };
 }
 
+function buildPdfDoc(business: Business, invoice: Invoice) {
+  const doc = new jsPDF("p", "mm", "a4");
+  const width = doc.internal.pageSize.getWidth();
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text(business.name, width / 2, 27, { align: "center" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`Address:- ${business.address}`, width / 2, 37, { align: "center" });
+  doc.text(business.subtitle, width / 2, 46, { align: "center" });
+  doc.text(`Mo:- ${business.phone}`, width / 2, 55, { align: "center" });
+  doc.setLineWidth(0.7);
+  doc.line(15, 66, 195, 66);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("BILL / INVOICE", width / 2, 80, { align: "center" });
+  doc.setFontSize(12);
+  doc.text(`To: ${invoice.customerName || "Customer Name"}`, 15, 96);
+  const dateParts = invoice.date.split("-");
+  const displayDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+  doc.text(`Date: ${displayDate}`, 195, 96, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  if (invoice.customerDescription) {
+    doc.text(invoice.customerDescription, 15, 105);
+  }
+
+  const body = invoice.groups.flatMap((group) =>
+    group.rows.map((row, rowIndex) => [
+      rowIndex === 0 ? String(group.srNo) : "",
+      row.description,
+      `${row.qty || 0} ${row.unit}`,
+      money(row.rate),
+      money(rowAmount(row))
+    ])
+  );
+
+  const tableStartY = invoice.customerDescription ? 112 : 104;
+
+  autoTable(doc, {
+    startY: tableStartY,
+    head: [["Sr. No.", "Particulars / Description", "Qty", "Rate (Rs.)", "Amount (Rs.)"]],
+    body: [
+      ...body,
+      [
+        {
+          content: "TOTAL",
+          colSpan: 4,
+          styles: { halign: "right", fontStyle: "bold" }
+        },
+        { content: money(invoiceTotal(invoice)), styles: { fontStyle: "bold" } }
+      ]
+    ],
+    theme: "grid",
+    styles: {
+      font: "helvetica",
+      fontSize: 11,
+      cellPadding: 4,
+      lineColor: [0, 0, 0],
+      lineWidth: 0.25,
+      textColor: [0, 0, 0]
+    },
+    headStyles: {
+      fillColor: [255, 255, 255],
+      textColor: [0, 0, 0],
+      fontStyle: "bold",
+      halign: "center",
+      lineColor: [0, 0, 0],
+      lineWidth: 0.25
+    },
+    columnStyles: {
+      0: { cellWidth: 20, halign: "center" },
+      1: { cellWidth: 88, halign: "left" },
+      2: { cellWidth: 20, halign: "center" },
+      3: { cellWidth: 24, halign: "right" },
+      4: { cellWidth: 28, halign: "right" }
+    },
+    margin: { left: 15, right: 15 }
+  });
+
+  return doc;
+}
+
+function exportExcelDoc(business: Business, invoice: Invoice) {
+  const dateParts = invoice.date.split("-");
+  const displayDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+
+  const sheetData: (string | number)[][] = [
+    [business.name],
+    [`Address:- ${business.address}`],
+    [business.subtitle],
+    [`Mo:- ${business.phone}`],
+    [""],
+    ["BILL / INVOICE"],
+    [`To: ${invoice.customerName || "Customer Name"}`, "", "", `Date: ${displayDate}`],
+    invoice.customerDescription ? [invoice.customerDescription] : [""],
+    [""],
+    ["Sr. No.", "Particulars / Description", "Qty", "Unit", "Rate (Rs.)", "Amount (Rs.)"]
+  ];
+
+  invoice.groups.forEach((group) => {
+    group.rows.forEach((row, rowIndex) => {
+      sheetData.push([
+        rowIndex === 0 ? group.srNo : "",
+        row.description,
+        row.qty,
+        row.unit,
+        row.rate,
+        rowAmount(row)
+      ]);
+    });
+  });
+
+  sheetData.push(["", "TOTAL", "", "", "", invoiceTotal(invoice)]);
+
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+  worksheet["!cols"] = [
+    { wch: 10 },
+    { wch: 45 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 15 },
+    { wch: 18 }
+  ];
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Invoice");
+  XLSX.writeFile(workbook, invoiceFilename(invoice, "xlsx"));
+}
+
+async function exportWordDoc(business: Business, invoice: Invoice) {
+  const border = { style: BorderStyle.SINGLE, size: 1, color: "000000" };
+  const dateParts = invoice.date.split("-");
+  const displayDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
+
+  const tableRows = [
+    new TableRow({
+      children: ["Sr. No.", "Particulars / Description", "Qty", "Rate (Rs.)", "Amount (Rs.)"].map(
+        (text) =>
+          new TableCell({
+            children: [new Paragraph({ children: [new TextRun({ text, bold: true })], alignment: AlignmentType.CENTER })],
+            borders: { top: border, bottom: border, left: border, right: border }
+          })
+      )
+    }),
+    ...invoice.groups.flatMap((group) =>
+      group.rows.map(
+        (row, index) =>
+          new TableRow({
+            children: [
+              index === 0 ? String(group.srNo) : "",
+              row.description,
+              `${row.qty} ${row.unit}`,
+              money(row.rate),
+              money(rowAmount(row))
+            ].map(
+              (text, cellIndex) =>
+                new TableCell({
+                  children: [
+                    new Paragraph({
+                      text,
+                      alignment: cellIndex === 1 ? AlignmentType.LEFT : AlignmentType.CENTER
+                    })
+                  ],
+                  borders: { top: border, bottom: border, left: border, right: border }
+                })
+            )
+          })
+      )
+    ),
+    new TableRow({
+      children: [
+        new TableCell({
+          columnSpan: 4,
+          children: [new Paragraph({ children: [new TextRun({ text: "TOTAL", bold: true })], alignment: AlignmentType.RIGHT })],
+          borders: { top: border, bottom: border, left: border, right: border }
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: money(invoiceTotal(invoice)), bold: true })], alignment: AlignmentType.CENTER })],
+          borders: { top: border, bottom: border, left: border, right: border }
+        })
+      ]
+    })
+  ];
+
+  const doc = new Document({
+    sections: [
+      {
+        children: [
+          new Paragraph({
+            children: [new TextRun({ text: business.name, bold: true, size: 36 })],
+            alignment: AlignmentType.CENTER
+          }),
+          new Paragraph({ text: `Address:- ${business.address}`, alignment: AlignmentType.CENTER }),
+          new Paragraph({ text: business.subtitle, alignment: AlignmentType.CENTER }),
+          new Paragraph({ text: `Mo:- ${business.phone}`, alignment: AlignmentType.CENTER }),
+          new Paragraph({ text: "__________________________________________________________", alignment: AlignmentType.CENTER }),
+          new Paragraph({ text: "" }),
+          new Paragraph({
+            children: [new TextRun({ text: "BILL / INVOICE", bold: true, size: 28, underline: {} })],
+            alignment: AlignmentType.CENTER
+          }),
+          new Paragraph({ text: "" }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: `To: ${invoice.customerName}`, bold: true }),
+              new TextRun({ text: `                                      Date: ${displayDate}`, bold: true })
+            ]
+          }),
+          new Paragraph({ text: invoice.customerDescription }),
+          new Paragraph({ text: "" }),
+          new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: tableRows })
+        ]
+      }
+    ]
+  });
+
+  const blob = await Packer.toBlob(doc);
+  downloadBlob(blob, invoiceFilename(invoice, "docx"));
+}
+
+function ZoomablePreview({ business, invoice }: { business: Business; invoice: Invoice }) {
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 760) {
+      const mobileWidth = window.innerWidth - 32;
+      const calcZoom = Math.max(0.42, Math.min(1, mobileWidth / 794));
+      setZoom(Number(calcZoom.toFixed(2)));
+    }
+  }, []);
+
+  return (
+    <div className="preview-viewer-box">
+      <div className="zoom-toolbar">
+        <span className="zoom-title">📄 PDF Preview</span>
+        <div className="zoom-btn-group">
+          <button
+            className="secondary compact-btn"
+            onClick={() => setZoom((z) => Math.max(0.3, Number((z - 0.1).toFixed(2))))}
+            title="Zoom Out"
+          >
+            -
+          </button>
+          <span className="zoom-label">{Math.round(zoom * 100)}%</span>
+          <button
+            className="secondary compact-btn"
+            onClick={() => setZoom((z) => Math.min(1.8, Number((z + 0.1).toFixed(2))))}
+            title="Zoom In"
+          >
+            +
+          </button>
+          <button
+            className="secondary compact-btn"
+            onClick={() => {
+              if (typeof window !== "undefined" && window.innerWidth < 760) {
+                const mobileWidth = window.innerWidth - 32;
+                setZoom(Number(Math.max(0.42, Math.min(1, mobileWidth / 794)).toFixed(2)));
+              } else {
+                setZoom(1);
+              }
+            }}
+          >
+            Auto Fit
+          </button>
+        </div>
+      </div>
+
+      <div className="paper-scroll-wrapper">
+        <div
+          className="paper-scale-wrapper"
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: "top center"
+          }}
+        >
+          <InvoicePreview business={business} invoice={invoice} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvoicePreviewModal({
+  invoice,
+  business,
+  onClose,
+  onPdf,
+  onShare,
+  onExcel,
+  onWord
+}: {
+  invoice: Invoice;
+  business: Business;
+  onClose: () => void;
+  onPdf: () => void;
+  onShare: () => void;
+  onExcel: () => void;
+  onWord: () => void;
+}) {
+  return (
+    <div className="preview-modal-backdrop" onClick={onClose}>
+      <div className="preview-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="preview-modal-header">
+          <h3>Bill Preview - {invoice.customerName || "Draft"}</h3>
+          <button className="icon-button" onClick={onClose} title="Close Preview">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="preview-modal-body">
+          <ZoomablePreview business={business} invoice={invoice} />
+        </div>
+        <div className="preview-modal-footer">
+          <button className="primary flex-1" onClick={onPdf}>
+            <Printer size={16} /> Download PDF
+          </button>
+          <button className="secondary flex-1" onClick={onShare}>
+            <Share2 size={16} /> Share PDF
+          </button>
+          <button className="secondary" onClick={onExcel} title="Download Excel">
+            <FileSpreadsheet size={16} />
+          </button>
+          <button className="secondary" onClick={onWord} title="Download Word">
+            <FileText size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [data, setData] = useState<AppData>(seedData);
   const [ready, setReady] = useState(false);
@@ -471,6 +804,7 @@ export default function Home() {
   const [activeStep, setActiveStep] = useState<"customer" | "items" | "preview">("customer");
   const [customerMode, setCustomerMode] = useState<"select" | "direct" | "new">("select");
   const [storageInfo, setStorageInfo] = useState<{ prettySize: string; bytes: number } | null>(null);
+  const [previewModalInvoiceId, setPreviewModalInvoiceId] = useState<string>("");
 
   const [isNeonConnected, setIsNeonConnected] = useState(false);
 
@@ -908,197 +1242,46 @@ export default function Home() {
 
   const exportPdf = () => {
     if (!activeInvoice) return;
-    const doc = new jsPDF("p", "mm", "a4");
-    const width = doc.internal.pageSize.getWidth();
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    doc.text(business.name, width / 2, 27, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.text(`Address:- ${business.address}`, width / 2, 37, { align: "center" });
-    doc.text(business.subtitle, width / 2, 46, { align: "center" });
-    doc.text(`Mo:- ${business.phone}`, width / 2, 55, { align: "center" });
-    doc.setLineWidth(0.7);
-    doc.line(15, 66, 195, 66);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("BILL / INVOICE", width / 2, 80, { align: "center" });
-    doc.setFontSize(12);
-    doc.text(`To: ${activeInvoice.customerName || "Customer Name"}`, 15, 96);
-    const dateParts = activeInvoice.date.split("-");
-    const displayDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
-    doc.text(`Date: ${displayDate}`, 195, 96, { align: "right" });
-    doc.setFont("helvetica", "normal");
-    if (activeInvoice.customerDescription) {
-      doc.text(activeInvoice.customerDescription, 15, 105);
-    }
-
-    const body = activeInvoice.groups.flatMap((group) =>
-      group.rows.map((row, rowIndex) => [
-        rowIndex === 0 ? String(group.srNo) : "",
-        row.description,
-        `${row.qty || 0} ${row.unit}`,
-        money(row.rate),
-        money(rowAmount(row))
-      ])
-    );
-
-    const tableStartY = activeInvoice.customerDescription ? 112 : 104;
-
-    autoTable(doc, {
-      startY: tableStartY,
-      head: [["Sr. No.", "Particulars / Description", "Qty", "Rate (Rs.)", "Amount (Rs.)"]],
-      body: [
-        ...body,
-        [
-          {
-            content: "TOTAL",
-            colSpan: 4,
-            styles: { halign: "right", fontStyle: "bold" }
-          },
-          { content: money(invoiceTotal(activeInvoice)), styles: { fontStyle: "bold" } }
-        ]
-      ],
-      theme: "grid",
-      styles: {
-        font: "helvetica",
-        fontSize: 11,
-        cellPadding: 4,
-        lineColor: [0, 0, 0],
-        lineWidth: 0.25,
-        textColor: [0, 0, 0]
-      },
-      headStyles: {
-        fillColor: [255, 255, 255],
-        textColor: [0, 0, 0],
-        fontStyle: "bold",
-        halign: "center",
-        lineColor: [0, 0, 0],
-        lineWidth: 0.25
-      },
-      columnStyles: {
-        0: { cellWidth: 20, halign: "center" },
-        1: { cellWidth: 88, halign: "left" },
-        2: { cellWidth: 20, halign: "center" },
-        3: { cellWidth: 24, halign: "right" },
-        4: { cellWidth: 28, halign: "right" }
-      },
-      margin: { left: 15, right: 15 }
-    });
+    const doc = buildPdfDoc(business, activeInvoice);
     doc.save(invoiceFilename(activeInvoice, "pdf"));
+  };
+
+  const sharePdf = async () => {
+    if (!activeInvoice) return;
+    try {
+      const doc = buildPdfDoc(business, activeInvoice);
+      const blob = doc.output("blob");
+      const filename = invoiceFilename(activeInvoice, "pdf");
+      const file = new File([blob], filename, { type: "application/pdf" });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: `${business.name} Invoice`,
+          text: `Invoice for ${activeInvoice.customerName || "Customer"}`,
+          files: [file]
+        });
+      } else if (navigator.share) {
+        await navigator.share({
+          title: `${business.name} Invoice`,
+          text: `Invoice for ${activeInvoice.customerName || "Customer"}`
+        });
+      } else {
+        downloadBlob(blob, filename);
+      }
+    } catch (e) {
+      console.warn("Share PDF error:", e);
+      exportPdf();
+    }
   };
 
   const exportExcel = () => {
     if (!activeInvoice) return;
-    const rows = activeInvoice.groups.flatMap((group) =>
-      group.rows.map((row, rowIndex) => ({
-        "Sr. No.": rowIndex === 0 ? group.srNo : "",
-        "Particulars / Description": row.description,
-        Qty: row.qty,
-        Unit: row.unit,
-        "Rate (Rs.)": row.rate,
-        "Amount (Rs.)": rowAmount(row)
-      }))
-    );
-    rows.push({
-      "Sr. No.": "",
-      "Particulars / Description": "TOTAL",
-      Qty: "" as unknown as number,
-      Unit: "",
-      "Rate (Rs.)": "" as unknown as number,
-      "Amount (Rs.)": invoiceTotal(activeInvoice)
-    });
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Invoice");
-    XLSX.writeFile(workbook, invoiceFilename(activeInvoice, "xlsx"));
+    exportExcelDoc(business, activeInvoice);
   };
 
   const exportWord = async () => {
     if (!activeInvoice) return;
-    const border = { style: BorderStyle.SINGLE, size: 1, color: "000000" };
-    const rows = [
-      new TableRow({
-        children: ["Sr. No.", "Particulars / Description", "Qty", "Rate (Rs.)", "Amount (Rs.)"].map(
-          (text) =>
-            new TableCell({
-              children: [new Paragraph({ text, alignment: AlignmentType.CENTER })],
-              borders: { top: border, bottom: border, left: border, right: border }
-            })
-        )
-      }),
-      ...activeInvoice.groups.flatMap((group) =>
-        group.rows.map(
-          (row, index) =>
-            new TableRow({
-              children: [
-                index === 0 ? String(group.srNo) : "",
-                row.description,
-                `${row.qty} ${row.unit}`,
-                money(row.rate),
-                money(rowAmount(row))
-              ].map(
-                (text, cellIndex) =>
-                  new TableCell({
-                    children: [
-                      new Paragraph({
-                        text,
-                        alignment: cellIndex === 1 ? AlignmentType.LEFT : AlignmentType.CENTER
-                      })
-                    ],
-                    borders: { top: border, bottom: border, left: border, right: border }
-                  })
-              )
-            })
-        )
-      ),
-      new TableRow({
-        children: [
-          new TableCell({
-            columnSpan: 4,
-            children: [new Paragraph({ text: "TOTAL", alignment: AlignmentType.RIGHT })],
-            borders: { top: border, bottom: border, left: border, right: border }
-          }),
-          new TableCell({
-            children: [new Paragraph({ text: money(invoiceTotal(activeInvoice)), alignment: AlignmentType.CENTER })],
-            borders: { top: border, bottom: border, left: border, right: border }
-          })
-        ]
-      })
-    ];
-    const doc = new Document({
-      sections: [
-        {
-          children: [
-            new Paragraph({
-              text: business.name,
-              heading: HeadingLevel.TITLE,
-              alignment: AlignmentType.CENTER
-            }),
-            new Paragraph({ text: `Address:- ${business.address}`, alignment: AlignmentType.CENTER }),
-            new Paragraph({ text: business.subtitle, alignment: AlignmentType.CENTER }),
-            new Paragraph({ text: `Mo:- ${business.phone}`, alignment: AlignmentType.CENTER }),
-            new Paragraph({ text: "" }),
-            new Paragraph({
-              children: [new TextRun({ text: "BILL / INVOICE", bold: true, underline: {} })],
-              alignment: AlignmentType.CENTER
-            }),
-            new Paragraph({ text: "" }),
-            new Paragraph({
-              children: [
-                new TextRun({ text: `To: ${activeInvoice.customerName}`, bold: true }),
-                new TextRun({ text: `          Date: ${activeInvoice.date}`, bold: true })
-              ]
-            }),
-            new Paragraph({ text: activeInvoice.customerDescription }),
-            new Paragraph({ text: "" }),
-            new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows })
-          ]
-        }
-      ]
-    });
-    const blob = await Packer.toBlob(doc);
-    downloadBlob(blob, invoiceFilename(activeInvoice, "docx"));
+    await exportWordDoc(business, activeInvoice);
   };
 
   if (!ready) {
@@ -1297,9 +1480,16 @@ export default function Home() {
                             </button>
                             <button
                               className="secondary"
+                              onClick={() => setPreviewModalInvoiceId(invoice.id)}
+                              title="Quick Preview PDF"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              className="secondary"
                               onClick={() => {
-                                setActiveInvoiceId(invoice.id);
-                                exportPdf();
+                                const doc = buildPdfDoc(business, invoice);
+                                doc.save(invoiceFilename(invoice, "pdf"));
                               }}
                               title="Download PDF"
                             >
@@ -1754,11 +1944,15 @@ export default function Home() {
 
               {activeStep === "preview" && (
                 <section className="preview-layout">
-                  <InvoicePreview business={business} invoice={activeInvoice} />
+                  <ZoomablePreview business={business} invoice={activeInvoice} />
                   <div className="download-panel">
                     <button className="primary wide" onClick={exportPdf}>
                       <Printer size={18} />
                       Download PDF
+                    </button>
+                    <button className="secondary wide" onClick={sharePdf}>
+                      <Share2 size={18} />
+                      Share PDF
                     </button>
                     <button className="secondary wide" onClick={exportExcel}>
                       <FileSpreadsheet size={18} />
@@ -1784,6 +1978,47 @@ export default function Home() {
             </div>
           )}
         </section>
+      )}
+
+      {previewModalInvoiceId && (
+        <InvoicePreviewModal
+          invoice={data.invoices.find((inv) => inv.id === previewModalInvoiceId)!}
+          business={business}
+          onClose={() => setPreviewModalInvoiceId("")}
+          onPdf={() => {
+            const inv = data.invoices.find((i) => i.id === previewModalInvoiceId);
+            if (inv) {
+              const doc = buildPdfDoc(business, inv);
+              doc.save(invoiceFilename(inv, "pdf"));
+            }
+          }}
+          onShare={() => {
+            const inv = data.invoices.find((i) => i.id === previewModalInvoiceId);
+            if (inv) {
+              const doc = buildPdfDoc(business, inv);
+              const blob = doc.output("blob");
+              const filename = invoiceFilename(inv, "pdf");
+              const file = new File([blob], filename, { type: "application/pdf" });
+              if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                navigator.share({
+                  title: `${business.name} Invoice`,
+                  text: `Invoice for ${inv.customerName || "Customer"}`,
+                  files: [file]
+                });
+              } else {
+                downloadBlob(blob, filename);
+              }
+            }
+          }}
+          onExcel={() => {
+            const inv = data.invoices.find((i) => i.id === previewModalInvoiceId);
+            if (inv) exportExcelDoc(business, inv);
+          }}
+          onWord={() => {
+            const inv = data.invoices.find((i) => i.id === previewModalInvoiceId);
+            if (inv) exportWordDoc(business, inv);
+          }}
+        />
       )}
     </main>
   );
