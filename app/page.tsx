@@ -1,6 +1,178 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+function fuzzyMatch(text: string, query: string): boolean {
+  if (!query || !query.trim()) return true;
+  const target = text.toLowerCase();
+  const tokens = query.toLowerCase().trim().split(/\s+/);
+  return tokens.every((token) => target.includes(token));
+}
+
+function autoSyncCustomer(
+  currentCustomers: Customer[],
+  name: string,
+  description: string,
+  businessId: string
+): Customer[] {
+  const trimmedName = name.trim();
+  if (!trimmedName) return currentCustomers;
+  const existing = currentCustomers.find(
+    (c) => c.businessId === businessId && c.name.toLowerCase() === trimmedName.toLowerCase()
+  );
+  if (existing) {
+    if ((existing.description || "") !== description.trim()) {
+      return currentCustomers.map((c) =>
+        c.id === existing.id ? { ...c, description: description.trim() } : c
+      );
+    }
+    return currentCustomers;
+  }
+  const newCustomer: Customer = {
+    id: uid(),
+    businessId,
+    name: trimmedName,
+    description: description.trim()
+  };
+  return [newCustomer, ...currentCustomers];
+}
+
+function ItemAutocomplete({
+  value,
+  onChange,
+  onSelectPreset,
+  presets,
+  placeholder
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  onSelectPreset: (preset: ItemPreset) => void;
+  presets: ItemPreset[];
+  placeholder?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!value.trim()) return presets.slice(0, 10);
+    return presets.filter((p) => fuzzyMatch(p.name, value)).slice(0, 10);
+  }, [presets, value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="autocomplete-container" ref={containerRef}>
+      <div className="search-wrap">
+        <Search size={15} />
+        <input
+          value={value}
+          onFocus={() => setIsOpen(true)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setIsOpen(true);
+          }}
+          placeholder={placeholder || "Type item description..."}
+        />
+      </div>
+      {isOpen && filtered.length > 0 && (
+        <div className="autocomplete-dropdown">
+          {filtered.map((item) => (
+            <div
+              key={item.id}
+              className="suggestion-item"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onSelectPreset(item);
+                setIsOpen(false);
+              }}
+            >
+              <div className="item-suggestion-row">
+                <span className="suggestion-title">{item.name}</span>
+                <span className="item-badge-pill">
+                  Rs. {item.rate} / {item.unit}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerAutocomplete({
+  value,
+  onChange,
+  onSelectCustomer,
+  customers,
+  placeholder
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  onSelectCustomer: (cust: Customer) => void;
+  customers: Customer[];
+  placeholder?: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!value.trim()) return customers.slice(0, 8);
+    return customers.filter((c) => fuzzyMatch(`${c.name} ${c.description}`, value)).slice(0, 8);
+  }, [customers, value]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="autocomplete-container" ref={containerRef}>
+      <input
+        className="input"
+        value={value}
+        onFocus={() => setIsOpen(true)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setIsOpen(true);
+        }}
+        placeholder={placeholder || "RAAJRATNA METAL INDUSTRIES Limited"}
+      />
+      {isOpen && filtered.length > 0 && (
+        <div className="autocomplete-dropdown">
+          {filtered.map((cust) => (
+            <div
+              key={cust.id}
+              className="suggestion-item"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onSelectCustomer(cust);
+                setIsOpen(false);
+              }}
+            >
+              <span className="suggestion-title">{cust.name}</span>
+              {cust.description && <span className="suggestion-sub">{cust.description}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 import {
   ArrowLeft,
   Building2,
@@ -255,6 +427,7 @@ export default function Home() {
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [activeStep, setActiveStep] = useState<"customer" | "items" | "preview">("customer");
   const [customerMode, setCustomerMode] = useState<"select" | "direct" | "new">("select");
+  const [storageInfo, setStorageInfo] = useState<{ prettySize: string; bytes: number } | null>(null);
 
   const [isNeonConnected, setIsNeonConnected] = useState(false);
 
@@ -305,6 +478,7 @@ export default function Home() {
       .then((result) => {
         if (result.connected) {
           setIsNeonConnected(true);
+          if (result.storageInfo) setStorageInfo(result.storageInfo);
           if (
             result.data &&
             Array.isArray(result.data.businesses) &&
@@ -429,14 +603,75 @@ export default function Home() {
     }
   };
 
+  const autoSavePreset = (description: string, rate: number, unit: string) => {
+    const name = description.trim();
+    if (!name || rate <= 0) return;
+    const existing = data.presets.find(
+      (p) => p.businessId === business.id && p.name.toLowerCase() === name.toLowerCase()
+    );
+    if (!existing) {
+      const newPreset: ItemPreset = {
+        id: uid(),
+        businessId: business.id,
+        name,
+        unit: unit || "No",
+        rate,
+        favorite: false
+      };
+      saveDataAndSync({ ...data, presets: [newPreset, ...data.presets] });
+    }
+  };
+
   const updateInvoice = (updater: (invoice: Invoice) => Invoice) => {
     if (!activeInvoice) return;
+    const updatedInv = updater(activeInvoice);
+    let updatedCustomers = data.customers;
+    if (updatedInv.customerName.trim()) {
+      updatedCustomers = autoSyncCustomer(
+        data.customers,
+        updatedInv.customerName,
+        updatedInv.customerDescription,
+        business.id
+      );
+    }
     const nextInvoices = data.invoices.map((invoice) =>
       invoice.id === activeInvoice.id
-        ? { ...updater(invoice), lastEdited: new Date().toISOString() }
+        ? { ...updatedInv, lastEdited: new Date().toISOString() }
         : invoice
     );
-    saveDataAndSync({ ...data, invoices: nextInvoices });
+    saveDataAndSync({ ...data, customers: updatedCustomers, invoices: nextInvoices });
+  };
+
+  const createInvoiceForCustomer = (custName: string) => {
+    const matchingCustomer = customers.find(
+      (c) => c.name.toLowerCase() === custName.trim().toLowerCase()
+    );
+    const invoice = newInvoice(business.id);
+    invoice.customerName = matchingCustomer ? matchingCustomer.name : custName;
+    invoice.customerDescription = matchingCustomer ? matchingCustomer.description : "";
+    if (matchingCustomer) invoice.customerId = matchingCustomer.id;
+
+    let updatedCustomers = data.customers;
+    if (invoice.customerName.trim()) {
+      updatedCustomers = autoSyncCustomer(
+        data.customers,
+        invoice.customerName,
+        invoice.customerDescription,
+        business.id
+      );
+    }
+
+    const nextData = {
+      ...data,
+      customers: updatedCustomers,
+      invoices: [invoice, ...data.invoices]
+    };
+
+    saveDataAndSync(nextData);
+    setActiveInvoiceId(invoice.id);
+    setActiveStep("items");
+    setViewMode("editor");
+    pushState("editor", "items");
   };
 
   const login = () => {
@@ -790,61 +1025,71 @@ export default function Home() {
 
   if (mode === "login") {
     return (
-      <main className="login-shell">
-        <section className="login-panel">
-          <div className="brand-mark">
-            <FileText size={36} />
+      <main className="login-shell-v2">
+        <section className="login-card-v2">
+          <div className="login-brand-header">
+            <div className="brand-icon-v2">
+              <FileText size={32} />
+            </div>
+            <h1>MADHAV INVOICE</h1>
+            <p>Fast & Easy Invoice Generator</p>
           </div>
-          <h1>Invoice Maker</h1>
-          <p className="muted">Select business and enter 4 digit PIN.</p>
 
-          <label className="field-label">Business</label>
-          <select
-            className="input"
-            value={selectedBusinessId}
-            onChange={(event) => setSelectedBusinessId(event.target.value)}
-          >
-            {data.businesses.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
+          <div className="login-form-group">
+            <label className="field-label">Select Business</label>
+            <select
+              className="input"
+              value={selectedBusinessId}
+              onChange={(event) => setSelectedBusinessId(event.target.value)}
+            >
+              {data.businesses.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
 
-          <label className="field-label">PIN</label>
-          <input
-            className="input pin-input"
-            inputMode="numeric"
-            maxLength={4}
-            value={pin}
-            onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
-            onKeyDown={(event) => event.key === "Enter" && login()}
-            placeholder="0000"
-          />
-          {pinError && <p className="error">{pinError}</p>}
-          <button className="primary wide" onClick={login}>
-            <Lock size={18} />
-            Open Business
-          </button>
+            <label className="field-label">Enter 4-Digit Business PIN</label>
+            <div className="pin-input-wrap">
+              <input
+                className="input pin-input-v2"
+                inputMode="numeric"
+                maxLength={4}
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+                onKeyDown={(event) => event.key === "Enter" && login()}
+                placeholder="••••"
+                autoFocus
+              />
+            </div>
+            {pinError && <p className="error" style={{ textAlign: "center" }}>{pinError}</p>}
 
-          <details className="admin-login">
+            <button className="primary wide" onClick={login}>
+              <Lock size={18} />
+              Open Business
+            </button>
+          </div>
+
+          <details className="admin-login-box">
             <summary>
               <Shield size={16} />
-              Admin Login (Only)
+              Admin Portal Access
             </summary>
-            <input
-              className="input pin-input"
-              inputMode="numeric"
-              maxLength={4}
-              value={adminPin}
-              onChange={(event) => setAdminPin(event.target.value.replace(/\D/g, ""))}
-              onKeyDown={(event) => event.key === "Enter" && adminLogin()}
-              placeholder="Admin PIN"
-            />
-            <button className="secondary wide" onClick={adminLogin}>
-              <Settings size={18} />
-              Open Admin Portal
-            </button>
+            <div className="login-form-group" style={{ marginTop: "12px" }}>
+              <input
+                className="input pin-input-v2"
+                inputMode="numeric"
+                maxLength={4}
+                value={adminPin}
+                onChange={(event) => setAdminPin(event.target.value.replace(/\D/g, ""))}
+                onKeyDown={(event) => event.key === "Enter" && adminLogin()}
+                placeholder="Admin PIN"
+              />
+              <button className="secondary wide" onClick={adminLogin}>
+                <Settings size={18} />
+                Open Admin Portal
+              </button>
+            </div>
           </details>
         </section>
       </main>
@@ -860,6 +1105,7 @@ export default function Home() {
         setSelectedBusinessId={setSelectedBusinessId}
         logout={logout}
         lastSavedAt={lastSavedAt}
+        storageInfo={storageInfo}
       />
     );
   }
@@ -911,10 +1157,20 @@ export default function Home() {
                 {invoicesByCustomer.map(([customerName, invoices]) => (
                   <div key={customerName} className="customer-group-section">
                     <div className="customer-group-header">
-                      <span className="customer-group-title">👤 {customerName}</span>
-                      <span className="customer-bill-count">
-                        {invoices.length} {invoices.length === 1 ? "Bill" : "Bills"}
-                      </span>
+                      <div className="customer-header-left">
+                        <span className="customer-group-title">👤 {customerName}</span>
+                        <span className="customer-bill-count">
+                          {invoices.length} {invoices.length === 1 ? "Bill" : "Bills"}
+                        </span>
+                      </div>
+                      <button
+                        className="customer-add-bill-btn"
+                        title="Create New Bill for this Customer"
+                        onClick={() => createInvoiceForCustomer(customerName)}
+                      >
+                        <Plus size={16} />
+                        <span>New Bill</span>
+                      </button>
                     </div>
 
                     <div className="drafts-grid">
@@ -1099,17 +1355,24 @@ export default function Home() {
                   {(customerMode === "direct" || customerMode === "new") && (
                     <div className="grid two">
                       <label>
-                        <span className="field-label">Customer Name</span>
-                        <input
-                          className="input"
+                        <span className="field-label">Customer Name (Search / Auto-suggest)</span>
+                        <CustomerAutocomplete
                           value={activeInvoice.customerName}
-                          onChange={(event) =>
+                          customers={customers}
+                          onChange={(val) =>
                             updateInvoice((invoice) => ({
                               ...invoice,
-                              customerName: event.target.value
+                              customerName: val
                             }))
                           }
-                          placeholder="RAAJRATNA METAL INDUSTRIES Limited"
+                          onSelectCustomer={(cust) =>
+                            updateInvoice((invoice) => ({
+                              ...invoice,
+                              customerId: cust.id,
+                              customerName: cust.name,
+                              customerDescription: cust.description
+                            }))
+                          }
                         />
                       </label>
                       <label>
@@ -1151,6 +1414,17 @@ export default function Home() {
                     <button
                       className="primary next-button"
                       onClick={() => {
+                        if (activeInvoice.customerName.trim()) {
+                          const nextCusts = autoSyncCustomer(
+                            data.customers,
+                            activeInvoice.customerName,
+                            activeInvoice.customerDescription,
+                            business.id
+                          );
+                          if (nextCusts !== data.customers) {
+                            saveDataAndSync({ ...data, customers: nextCusts });
+                          }
+                        }
                         setActiveStep("items");
                         pushState("editor", "items");
                       }}
@@ -1206,12 +1480,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <datalist id="item-presets">
-                    {visiblePresets.map((item) => (
-                      <option key={item.id} value={item.name} />
-                    ))}
-                  </datalist>
-
                   <div className="items-table">
                     <div className="table-head">
                       <span>Sr.</span>
@@ -1230,38 +1498,31 @@ export default function Home() {
                             </div>
                             <div className="description-cell">
                               <span className="mobile-label">Particulars / Description</span>
-                              <div className="search-wrap">
-                                <Search size={15} />
-                                <input
-                                  list="item-presets"
-                                  value={row.description}
-                                  onBlur={() => {
-                                    const found = visiblePresets.find(
-                                      (item) =>
-                                        item.name.toLowerCase() === row.description.toLowerCase()
-                                    );
-                                    if (found) applyPreset(row.id, found);
-                                  }}
-                                  onChange={(event) =>
-                                    updateInvoice((invoice) => ({
-                                      ...invoice,
-                                      groups: invoice.groups.map((invoiceGroup) =>
-                                        invoiceGroup.id === group.id
-                                          ? {
-                                              ...invoiceGroup,
-                                              rows: invoiceGroup.rows.map((itemRow) =>
-                                                itemRow.id === row.id
-                                                  ? { ...itemRow, description: event.target.value }
-                                                  : itemRow
-                                              )
-                                            }
-                                          : invoiceGroup
-                                      )
-                                    }))
-                                  }
-                                  placeholder="Type item description..."
-                                />
-                              </div>
+                              <ItemAutocomplete
+                                value={row.description}
+                                presets={visiblePresets}
+                                onChange={(val) =>
+                                  updateInvoice((invoice) => ({
+                                    ...invoice,
+                                    groups: invoice.groups.map((invoiceGroup) =>
+                                      invoiceGroup.id === group.id
+                                        ? {
+                                            ...invoiceGroup,
+                                            rows: invoiceGroup.rows.map((itemRow) =>
+                                              itemRow.id === row.id
+                                                ? { ...itemRow, description: val }
+                                                : itemRow
+                                            )
+                                          }
+                                        : invoiceGroup
+                                    )
+                                  }))
+                                }
+                                onSelectPreset={(presetItem) => {
+                                  applyPreset(row.id, presetItem);
+                                  autoSavePreset(presetItem.name, presetItem.rate, presetItem.unit);
+                                }}
+                              />
                             </div>
 
                             <div className="item-num-grid">
@@ -1504,7 +1765,8 @@ function AdminPanel({
   selectedBusinessId,
   setSelectedBusinessId,
   logout,
-  lastSavedAt
+  lastSavedAt,
+  storageInfo
 }: {
   data: AppData;
   setData: React.Dispatch<React.SetStateAction<AppData>>;
@@ -1512,6 +1774,7 @@ function AdminPanel({
   setSelectedBusinessId: (id: string) => void;
   logout: () => void;
   lastSavedAt: string;
+  storageInfo: { prettySize: string; bytes: number } | null;
 }) {
   const [tab, setTab] = useState<"business" | "items" | "customers" | "database">("business");
   const [dbStatus, setDbStatus] = useState<string>("Local Storage Mode (Offline / Free)");
@@ -1819,6 +2082,26 @@ function AdminPanel({
             <div className="status-badge">
               <strong>Status:</strong> {dbStatus}
             </div>
+
+            {storageInfo && (
+              <div className="storage-meter-card">
+                <div className="storage-meter-header">
+                  <span>💾 Neon DB Storage Usage</span>
+                  <span>{storageInfo.prettySize} / 512 MB Free</span>
+                </div>
+                <div className="storage-bar-track">
+                  <div
+                    className="storage-bar-fill"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.max(1, (storageInfo.bytes / (512 * 1024 * 1024)) * 100)
+                      )}%`
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="db-actions">
               <button className="secondary" onClick={checkDbConnection} disabled={isSyncing}>
